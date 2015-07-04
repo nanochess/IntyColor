@@ -23,7 +23,9 @@
 //  Revision: Mar/04/2015. Solved lot of bugs when handling wide images.
 //  Revision: Jul/04/2015. Solved bug in syntax for data (extra comma in
 //                         non-standard images) and added code to display
-//                         non-standard images.
+//                         non-standard images. Generated code shows one
+//                         line of data per row (instead of two lines).
+//                         Added -p option.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -127,6 +129,7 @@ int main(int argc, char *argv[])
     int intybasic;
     int stub;
     int use_bitmap;
+    int use_print;
     char *label = "screen";
     int size_x;
     int size_y;
@@ -141,9 +144,10 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Usage:\n\n");
         fprintf(stderr, "    intycolor image.bmp image.asm [label]\n");
         fprintf(stderr, "        Creates image for use with assembler code\n\n");
-        fprintf(stderr, "    intycolor -b [-n] [-i] image.bmp image.bas [label]\n");
+        fprintf(stderr, "    intycolor -b [-n] [-p] [-i] image.bmp image.bas [label]\n");
         fprintf(stderr, "        Creates image for use with IntyBASIC code\n\n");
         fprintf(stderr, "    -n    Removes stub in IntyBASIC code\n");
+        fprintf(stderr, "    -p    Uses PRINT in IntyBASIC code\n");
         fprintf(stderr, "    -o20  Starts offset for cards in 20 (0-63 is valid)\n");
         fprintf(stderr, "    -i    Generates BITMAP statements instead of DATA\n\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
@@ -171,6 +175,7 @@ int main(int argc, char *argv[])
     intybasic = 0;
     stack_color = 0;
     use_bitmap = 0;
+    use_print = 0;
     base_offset = 0;
     stub = 1;
     arg = 1;
@@ -180,6 +185,8 @@ int main(int argc, char *argv[])
             intybasic = 1;
         if (c == 'o')
             base_offset = atoi(argv[arg] + 2);
+        if (c == 'p')
+            use_print = 1;
         if (c == 's') {
             stack_color = 1;
             if (strlen(argv[arg]) != 6) {
@@ -494,17 +501,29 @@ int main(int argc, char *argv[])
                         label, c / BLOCK_SIZE);
             }
             fprintf(a, "\tWAIT\n");
-            if (size_x != 160) {
-                fprintf(a, "\tFOR y = 0 TO %d\n", size_y / 8 < 12 ? size_y / 8 - 1 : 11);
-                fprintf(a, "\tFOR x = 0 TO %d\n", size_x_block < 20 ? size_x_block - 1 : 19);
-                fprintf(a, "\tPRINT AT y * 20 + x,%s_cards(y * %d + x)\n", label, size_x_block);
-                fprintf(a, "\tNEXT x\n");
-                fprintf(a, "\tNEXT y\n");
+            if (use_print) {
+                for (c = 0; c < size_x_block * (size_y / 8); c++) {
+                    if (c % size_x_block == 0)
+                        fprintf(a, "\tPRINT AT %d,", c / size_x_block * 20);
+                    fprintf(a, "$%04X", screen[c]);
+                    if (c % size_x_block == size_x_block - 1 || c + 1 == size_x_block * (size_y / 8))
+                        fprintf(a, "\n");
+                    else
+                        fprintf(a, ",");
+                }
             } else {
-                if (size_y < 96)
-                    fprintf(a, "\tSCREEN %s_cards,0,0,20,%d\n", label, size_y / 8);
-                else
-                    fprintf(a, "\tSCREEN %s_cards\n", label);
+                if (size_x != 160) {
+                    fprintf(a, "\tFOR y = 0 TO %d\n", size_y / 8 < 12 ? size_y / 8 - 1 : 11);
+                    fprintf(a, "\tFOR x = 0 TO %d\n", size_x_block < 20 ? size_x_block - 1 : 19);
+                    fprintf(a, "\tPRINT AT y * 20 + x,%s_cards(y * %d + x)\n", label, size_x_block);
+                    fprintf(a, "\tNEXT x\n");
+                    fprintf(a, "\tNEXT y\n");
+                } else {
+                    if (size_y < 96)
+                        fprintf(a, "\tSCREEN %s_cards,0,0,20,%d\n", label, size_y / 8);
+                    else
+                        fprintf(a, "\tSCREEN %s_cards\n", label);
+                }
             }
             fprintf(a, "loop:\n");
             fprintf(a, "\tGOTO loop\n\n");
@@ -531,16 +550,18 @@ int main(int argc, char *argv[])
             }
         }
         fprintf(a, "\n");
-        fprintf(a, "\tREM %dx%d cards\n", size_x_block, size_y / 8);
-        fprintf(a, "%s_cards:\n", label);
-        for (c = 0; c < size_x_block * (size_y / 8); c++) {
-            if (c % size_x_block == 0)
-                fprintf(a, "\tDATA ");
-            fprintf(a, "$%04X", screen[c]);
-            if (c % size_x_block == size_x_block - 1 || c + 1 == size_x_block * (size_y / 8))
-                fprintf(a, "\n");
-            else
-                fprintf(a, ",");
+        if (!use_print) {
+            fprintf(a, "\tREM %dx%d cards\n", size_x_block, size_y / 8);
+            fprintf(a, "%s_cards:\n", label);
+            for (c = 0; c < size_x_block * (size_y / 8); c++) {
+                if (c % size_x_block == 0)
+                    fprintf(a, "\tDATA ");
+                fprintf(a, "$%04X", screen[c]);
+                if (c % size_x_block == size_x_block - 1 || c + 1 == size_x_block * (size_y / 8))
+                    fprintf(a, "\n");
+                else
+                    fprintf(a, ",");
+            }
         }
     } else {
         fprintf(a, "\t; %d bitmaps\n", number_bitmaps);
