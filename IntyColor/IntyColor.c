@@ -26,11 +26,18 @@
 //                         non-standard images. Generated code shows one
 //                         line of data per row (instead of two lines).
 //                         Added -p option.
+//  Revision: Jul/13/2015. Solved bug where starting offset for cards would
+//                         move also references to GROM cards. Support for
+//                         256 colors BMP. Added comments in output for
+//                         version, date and command-line.
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <time.h>
+
+#define VERSION "v0.8 Jul/14/2015"     // Software version
 
 #define BLOCK_SIZE   16  // Before 18, reduced for PLAY support
 
@@ -121,7 +128,7 @@ int main(int argc, char *argv[])
     int c;
     int d;
     int n;
-    unsigned char buffer[32];
+    unsigned char buffer[54 + 1024];  /* Header and palette */
     unsigned short *ap;
     int best_color;
     int best_difference;
@@ -136,10 +143,14 @@ int main(int argc, char *argv[])
     int size_x_block;
     int err_code;
     int base_offset;
+    time_t actual;
+    struct tm *date;
     
+    actual = time(0);
+    date = localtime(&actual);
     if (argc < 3) {
         fprintf(stderr, "\nConverter from BMP to Intellivision Background/Foreground format\n");
-        fprintf(stderr, "v0.8 Jul/04/2015  by Oscar Toledo G. http://nanochess.org\n");
+        fprintf(stderr, VERSION "  by Oscar Toledo G. http://nanochess.org\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "Usage:\n\n");
         fprintf(stderr, "    intycolor image.bmp image.asm [label]\n");
@@ -214,14 +225,26 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Missing input file\n");
         exit(2);
     }
-    fread(buffer, 1, 32, a);
+    fread(buffer, 1, 54 + 1024, a);
     if (buffer[0] != 'B' || buffer[1] != 'M') {
         fprintf(stderr, "The input file is not in BMP format\n");
         fclose(a);
         exit(3);
     }
-    if (buffer[0x1c] != 24 && buffer[0x1c] != 32) {
-        fprintf(stderr, "The input file is not in 24/32-bits format\n");
+    if (buffer[0x1c] != 8 && buffer[0x1c] != 24 && buffer[0x1c] != 32) {
+        fprintf(stderr, "The input file is not in 8/24/32-bits format\n");
+        fclose(a);
+        exit(3);
+    }
+    if (buffer[0x1c] == 8) {
+        if (buffer[0x2e] != 0 || (buffer[0x2f] != 0 && buffer[0x2f] != 1)) {
+            fprintf(stderr, "Unsupported palette for 8 bits format\n");
+            fclose(a);
+            exit(3);
+        }
+    }
+    if (buffer[0x1e] != 0 || buffer[0x1f] != 0 || buffer[0x20] != 0 || buffer[0x21] != 0) {
+        fprintf(stderr, "Cannot handle compressed input files\n");
         fclose(a);
         exit(3);
     }
@@ -260,10 +283,14 @@ int main(int argc, char *argv[])
     fseek(a, buffer[10] | (buffer[11] << 8) | (buffer[12] << 16) | (buffer[13] << 24), SEEK_SET);
     for (y = n ? 0 : size_y - 1; n ? y < size_y : y >= 0; n ? y++ : y--) {
         for (x = 0; x < size_x; x++) {
-            if (buffer[0x1c] == 24)
+            if (buffer[0x1c] == 8) {            /* 256 color */
+                fread(buffer, 1, 1, a);
+                memcpy(buffer, buffer + 54 + buffer[0] * 4, 4);
+            } else if (buffer[0x1c] == 24) {    /* 24 bits */
                 fread(buffer, 1, 3, a);
-            else
+            } else {                            /* 32 bits */
                 fread(buffer, 1, 4, a);
+            }
             best_color = 0;
             best_difference = 100000;
             for (c = 0; c < 16; c++) {
@@ -454,19 +481,22 @@ int main(int argc, char *argv[])
             }
             if (best_color == -1)
                 best_color = 0;
+            if (c >= 256)
+                c += base_offset;
             if (stack_color) {
                 if (best_difference == stack[current_stack])
                     d = 0;
                 else if (best_difference == stack[(current_stack + 1) & 3]) {
                     d = 0x2000;
                     current_stack = (current_stack + 1) & 3;
-                } else
+                } else {
                     d = 0;
-                *ap++ = ((c + base_offset) << 3) | (best_color & 7) | ((best_color & 8) << 9) | d;
+                }
+                *ap++ = (c << 3) | (best_color & 7) | ((best_color & 8) << 9) | d;
             } else {
                 if (best_difference == -1)
                     best_difference = 0;
-                *ap++ = ((c + base_offset) << 3) | best_color | ((best_difference & 3) << 9) | ((best_difference & 0x04) << 11) | ((best_difference & 0x08) << 9);
+                *ap++ = (c << 3) | best_color | ((best_difference & 3) << 9) | ((best_difference & 0x04) << 11) | ((best_difference & 0x08) << 9);
             }
         }
     }
@@ -487,6 +517,19 @@ int main(int argc, char *argv[])
     if (arg < argc)
         label = argv[arg];
     if (intybasic == 1) {
+        fprintf(a, "\tREM IntyColor " VERSION "\n");
+        fprintf(a, "\tREM Command: ");
+        for (c = 0; c < argc; c++) {
+            char *b;
+            
+            b = strchr(argv[c], ' ');
+            if (b != NULL)
+                fprintf(a, "\"%s\" ", argv[c]);
+            else
+                fprintf(a, "%s ", argv[c]);
+        }
+        fprintf(a, "\n");
+        fprintf(a, "\tREM Created: %s\n", asctime(date));
         if (stub) {
             fprintf(a, "\tREM stub for showing image\n");
             if (stack_color)
@@ -564,6 +607,19 @@ int main(int argc, char *argv[])
             }
         }
     } else {
+        fprintf(a, "\t; IntyColor " VERSION "\n");
+        fprintf(a, "\t; Command: ");
+        for (c = 0; c < argc; c++) {
+            char *b;
+            
+            b = strchr(argv[c], ' ');
+            if (b != NULL)
+                fprintf(a, "\"%s\" ", argv[c]);
+            else
+                fprintf(a, "%s ", argv[c]);
+        }
+        fprintf(a, "\n");
+        fprintf(a, "\t; Created: %s\n", asctime(date));
         fprintf(a, "\t; %d bitmaps\n", number_bitmaps);
         fprintf(a, "%s_bitmaps:\n", label);
         for (c = 0; c < number_bitmaps; c++) {
