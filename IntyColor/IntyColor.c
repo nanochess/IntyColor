@@ -30,6 +30,9 @@
 //                         move also references to GROM cards. Support for
 //                         256 colors BMP. Added comments in output for
 //                         version, date and command-line.
+//  Revision: Jul/16/2015. For assembler added a comment of begin/end for
+//                         easy extraction by automated tools (requested by
+//                         First Spear)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,7 +40,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v0.8 Jul/14/2015"     // Software version
+#define VERSION "v0.9 prerelease Jul/16/2015"     // Software version
 
 #define BLOCK_SIZE   16  // Before 18, reduced for PLAY support
 
@@ -621,6 +624,7 @@ int main(int argc, char *argv[])
         fprintf(a, "\n");
         fprintf(a, "\t; Created: %s\n", asctime(date));
         fprintf(a, "\t; %d bitmaps\n", number_bitmaps);
+        fprintf(a, "\t; Begin %s_bitmaps\n", label);
         fprintf(a, "%s_bitmaps:\n", label);
         for (c = 0; c < number_bitmaps; c++) {
             fprintf(a, "\tDECLE $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\n",
@@ -629,6 +633,7 @@ int main(int argc, char *argv[])
                     bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
                     bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
         }
+        fprintf(a, "\t; End %s_bitmaps\n", label);
         fprintf(a, "\t\n");
         fprintf(a, "\t; %dx%d cards\n", size_x_block, size_y / 8);
         fprintf(a, "%s_cards:\n", label);
