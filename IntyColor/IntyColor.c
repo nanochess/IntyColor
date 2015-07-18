@@ -33,6 +33,10 @@
 //  Revision: Jul/16/2015. For assembler added a comment of begin/end for
 //                         easy extraction by automated tools (requested by
 //                         First Spear)
+//  Revision: Jul/17/2015. When option -p is used avoids to generate PRINT
+//                         statements that go off screen inserting comments.
+//                         (reported by First Spear). Warns about -p and -i
+//                         not doing any effect in assembler mode.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,7 +44,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v0.9 prerelease Jul/16/2015"     // Software version
+#define VERSION "v0.9 prerelease Jul/17/2015"     // Software version
 
 #define BLOCK_SIZE   16  // Before 18, reduced for PLAY support
 
@@ -178,6 +182,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "requires a fixed size of 160x96 or any multiple of 8 pixels.\n");
         return 0;
     }
+    
+    /* Check for GROM to use shapes */
     a = fopen("grom.bin", "rb");
     if (a != NULL) {
         fread(grom, 1, sizeof(grom), a);
@@ -186,6 +192,8 @@ int main(int argc, char *argv[])
     } else {
         grom_exists = 0;
     }
+    
+    /* Process arguments */
     intybasic = 0;
     stack_color = 0;
     use_bitmap = 0;
@@ -195,13 +203,13 @@ int main(int argc, char *argv[])
     arg = 1;
     while (arg < argc && argv[arg][0] == '-') {
         c = tolower(argv[arg][1]);
-        if (c == 'b')
+        if (c == 'b')  /* -b IntyBASIC mode */
             intybasic = 1;
-        if (c == 'o')
+        if (c == 'o')  /* -o11 Initial GRAM card number */
             base_offset = atoi(argv[arg] + 2);
-        if (c == 'p')
+        if (c == 'p')  /* -p Use PRINT statement (IntyBASIC) */
             use_print = 1;
-        if (c == 's') {
+        if (c == 's') {  /* -s0000 Use Color Stack mode */
             stack_color = 1;
             if (strlen(argv[arg]) != 6) {
                 fprintf(stderr, "Warning: Ignoring -s argument as size is invalid");
@@ -212,16 +220,20 @@ int main(int argc, char *argv[])
                 stack[3] = from_hex(argv[arg][5]);
             }
         }
-        if (c == 'n')
+        if (c == 'n')  /* -n Remove stub from output */
             stub = 0;
-        if (c == 'i')
+        if (c == 'i')  /* -i Use BITMAP instead of DATA (IntyBASIC) */
             use_bitmap = 1;
         arg++;
     }
+    if (use_print || use_bitmap)
+        fprintf(stderr, "Warning: arguments -p and -i are ignored when in assembler mode");
     if (arg >= argc) {
         fprintf(stderr, "Missing input file name\n");
         exit(2);
     }
+    
+    /* Open input file */
     a = fopen(argv[arg], "rb");
     arg++;
     if (a == NULL) {
@@ -261,7 +273,7 @@ int main(int argc, char *argv[])
         exit(3);
     }
     if ((size_y & 7) != 0) {
-        fprintf(stderr, "The input file doesn't measure a multiple of 8 in X size\n");
+        fprintf(stderr, "The input file doesn't measure a multiple of 8 in Y size\n");
         fclose(a);
         exit(3);
     }
@@ -283,6 +295,8 @@ int main(int argc, char *argv[])
         fclose(a);
         exit(3);
     }
+    
+    /* Read image and approximate any color to the local palette */
     fseek(a, buffer[10] | (buffer[11] << 8) | (buffer[12] << 16) | (buffer[13] << 24), SEEK_SET);
     for (y = n ? 0 : size_y - 1; n ? y < size_y : y >= 0; n ? y++ : y--) {
         for (x = 0; x < size_x; x++) {
@@ -309,11 +323,15 @@ int main(int argc, char *argv[])
         }
     }
     fclose(a);
+    
+    /* Generate the bitmap */
     err_code = 0;
     current_stack = 0;
     ap = screen;
     for (y = 0; y < size_y; y += 8) {
-        for (x = 0; x < size_x; x += 8) {
+        for (x = 0; x < size_x; x += 8) {  /* For each 8x8 block */
+            
+            /* Look for the two colors */
             best_color = -1;
             best_difference = -1;
             for (c = 0; c < 8; c++) {
@@ -344,6 +362,8 @@ int main(int argc, char *argv[])
                         best_color, x, y);
                 err_code = 1;
             }
+            
+            /* Align color per mode */
             if (stack_color) {
                 if (best_color == stack[current_stack]
                     && best_difference != -1) {
@@ -376,6 +396,8 @@ int main(int argc, char *argv[])
                     best_difference = c;
                 }
             }
+            
+            /* Convert to bitmap */
             for (c = 0; c < 8; c++) {
                 bit[c] = 0;
                 for (d = 0; d < 8; d++) {
@@ -386,7 +408,7 @@ int main(int argc, char *argv[])
             if (memcmp(&bit[0], "\x00\x00\x00\x00\x00\x00\x00\x00", 8) == 0) {
                 c = 0;
             } else {
-                if (grom_exists) {
+                if (grom_exists) {  /* Try to optimize output using GROM shapes */
                     if (stack_color) {
                         c = 256;
                         if (best_color < 8) {
@@ -443,12 +465,14 @@ int main(int argc, char *argv[])
                 } else {
                     c = -1;
                 }
-                if (c == -1) {
+                if (c == -1) {  /* Not in GROM? try to assign a GRAM card */
                     for (c = 0; c < number_bitmaps; c++) {
                         if (memcmp(&bitmaps[c * 8], &bit[0], 8) == 0)
                             break;
                     }
                     if (c == number_bitmaps) {
+                        
+                        /* Try to search a complemented GRAM card */
                         if ((stack_color && (best_difference < 8 &&
                                              (best_color == stack[current_stack] || best_color == stack[(current_stack + 1) & 3]))) ||
                             (!stack_color && best_difference < 8)) {
@@ -486,6 +510,8 @@ int main(int argc, char *argv[])
                 best_color = 0;
             if (c >= 256)
                 c += base_offset;
+            
+            /* Generate final value for BACKTAB */
             if (stack_color) {
                 if (best_difference == stack[current_stack])
                     d = 0;
@@ -503,6 +529,8 @@ int main(int argc, char *argv[])
             }
         }
     }
+    
+    /* Open output file and write result */
     if (arg >= argc) {
         fprintf(stderr, "Missing output file name\n");
         free(bitmap);
@@ -519,7 +547,7 @@ int main(int argc, char *argv[])
     arg++;
     if (arg < argc)
         label = argv[arg];
-    if (intybasic == 1) {
+    if (intybasic == 1) {  /* IntyBASIC mode */
         fprintf(a, "\tREM IntyColor " VERSION "\n");
         fprintf(a, "\tREM Command: ");
         for (c = 0; c < argc; c++) {
@@ -549,13 +577,18 @@ int main(int argc, char *argv[])
             fprintf(a, "\tWAIT\n");
             if (use_print) {
                 for (c = 0; c < size_x_block * (size_y / 8); c++) {
+                    if (c >= size_x_block * 12)         /* Avoid writing off-screen */
+                        fprintf(a, "'");
                     if (c % size_x_block == 0)
                         fprintf(a, "\tPRINT AT %d,", c / size_x_block * 20);
                     fprintf(a, "$%04X", screen[c]);
-                    if (c % size_x_block == size_x_block - 1 || c + 1 == size_x_block * (size_y / 8))
+                    if (c % size_x_block == size_x_block - 1 || c + 1 == size_x_block * (size_y / 8)) {
                         fprintf(a, "\n");
-                    else
+                    } else {
+                        if (c % size_x_block == 20)     /* Avoid writing off-screen */
+                            fprintf(a, "'");
                         fprintf(a, ",");
+                    }
                 }
             } else {
                 if (size_x != 160) {
@@ -609,7 +642,7 @@ int main(int argc, char *argv[])
                     fprintf(a, ",");
             }
         }
-    } else {
+    } else {  /* Assembler code mode */
         fprintf(a, "\t; IntyColor " VERSION "\n");
         fprintf(a, "\t; Command: ");
         for (c = 0; c < argc; c++) {
