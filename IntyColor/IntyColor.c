@@ -37,6 +37,8 @@
 //                         statements that go off screen inserting comments.
 //                         (reported by First Spear). Warns about -p and -i
 //                         not doing any effect in assembler mode.
+//  Revision: Jul/20/2015. Solved bug where Background/Foreground limitations
+//                         applied to Color Stack mode.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -351,17 +353,6 @@ int main(int argc, char *argv[])
                     }
                 }
             }
-            if (best_color > 7) {
-                c = best_color;
-                best_color = best_difference;
-                best_difference = c;
-            }
-            if (best_color > 7) {
-                fprintf(stderr,
-                        "Foreground color %d outside of primary colors in block %d,%d\n",
-                        best_color, x, y);
-                err_code = 1;
-            }
             
             /* Align color per mode */
             if (stack_color) {
@@ -386,6 +377,17 @@ int main(int argc, char *argv[])
                     err_code = 1;
                 }
             } else {
+                if (best_color > 7) {
+                    c = best_color;
+                    best_color = best_difference;
+                    best_difference = c;
+                }
+                if (best_color > 7) {
+                    fprintf(stderr,
+                            "Foreground color %d outside of primary colors in block %d,%d\n",
+                            best_color, x, y);
+                    err_code = 1;
+                }
                 if (best_difference == -1) {
                     best_difference = best_color;
                     best_color = -1;
