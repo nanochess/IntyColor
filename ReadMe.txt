@@ -1,4 +1,4 @@
-IntyColor converter v0.8
+IntyColor converter v0.9
 by Oscar Toledo Gutierrez
 http://nanochess.org/
 
