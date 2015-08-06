@@ -39,6 +39,12 @@
 //                         not doing any effect in assembler mode.
 //  Revision: Jul/20/2015. Solved bug where Background/Foreground limitations
 //                         applied to Color Stack mode.
+//  Revision: Aug/04/2015. Changed color table constants to hexadecimal and
+//                         added color names. Replaced some variable names
+//                         so code is more autocommenting. New -m option for
+//                         automagical 8x8 MOB use for 3 or more colors
+//                         support per card.
+//  Revision: Aug/05/2015. Prefers a deeper X/Y offset to optimize MOB usage.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,49 +52,62 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v0.9 Jul/31/2015"     // Software version
+#define VERSION "v0.9 Aug/05/2015"     /* Software version */
 
-#define BLOCK_SIZE   16  // Before 18, reduced for PLAY support
+#define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
-char *bitmap;
+unsigned char *bitmap;          /* Origin bitmap converted to indexed colors 0-15 */
+int size_x;                     /* Size X in pixels */
+int size_y;                     /* Size Y in pixels */
 
 int grom_exists;
-unsigned char grom[256 * 8];
+/* Indicates if GROM file exists for using */
+unsigned char grom[256 * 8];    /* Contents of GROM file */
 
-unsigned char bitmaps[64 * 8];
-int number_bitmaps;
+unsigned char bitmaps[64 * 8];  /* Bitmaps created */
+int number_bitmaps;             /* Number of bitmaps used */
 
 unsigned char bit[8];
 
-unsigned short *screen;
+unsigned short *screen;         /* Screen cards */
+int size_x_cards;               /* Screen X size in cards */
+int size_y_cards;               /* Screen Y size in cards */
 
-int stack_color;
-int current_stack;
-int stack[4];
+signed char *used_color;        /* Array of used colors per card */
+
+int stack_color;                /* Indicates stack color mode */
+int current_stack;              /* Current point to color stack */
+int stack[4];                   /* Stack of colors */
+
+int mobs[24];
+int mob_pointer;
+
+int err_code;
 
 /*
 ** The 16 colors available in Intellivision
 */
 unsigned char colors[16 * 3] = {
-    0, 0, 0,
-    0, 45, 255,
-    255, 61, 16,
-    201, 207, 171,
+    /*R*/ /*G*/ /*B*/
+    0x00, 0x00, 0x00,  /* Black */
+    0x00, 0x2d, 0xff,  /* Red */
+    0xff, 0x3d, 0x10,  /* Blue */
+    0xc9, 0xcf, 0xab,  /* Tan */
+
+    0x38, 0x6b, 0x3f,  /* Dark green */
+    0x00, 0xa7, 0x56,  /* Green */
+    0xfa, 0xea, 0x50,  /* Yellow */
+    0xff, 0xff, 0xff,  /* White */
     
-    56, 107, 63,
-    0, 167, 86,
-    250, 234, 80,
-    255, 255, 255,
+    0xbd, 0xac, 0xc8,  /* Grey */
+    0x24, 0xb8, 0xff,  /* Cyan */
+    0xff, 0xb4, 0x1f,  /* Orange */
+    0x54, 0x6e, 0x00,  /* Brown */
     
-    189, 172, 200,
-    36, 184, 255,
-    255, 180, 31,
-    84, 110, 0,
-    
-    255, 78, 87,
-    164, 150, 255,
-    117, 204, 128,
-    181, 26, 88,
+    0xff, 0x4e, 0x57,  /* Pink */
+    0xa4, 0x96, 0xff,  /* Light blue */
+    0x75, 0xcc, 0x80,  /* Yellow green */
+    0xb5, 0x1a, 0x58,  /* Purple */
 };
 
 /*
@@ -108,8 +127,8 @@ int from_hex(int letter)
 }
 
 /*
- ** Converts a byte to a binary string
- */
+** Converts a byte to a binary string
+*/
 char *binary(int data)
 {
     static char string[9];
@@ -127,8 +146,253 @@ char *binary(int data)
 }
 
 /*
- ** Main program
+ ** Check for valid bitmap in color and size for representation as a MOB
  */
+int check_for_valid(int color, int x, int y, int x_size, int y_size, int *xo, int *yo)
+{
+    int x1;
+    int y1;
+    int x2;
+    int y2;
+    signed char *current_used;
+    int c;
+    
+    if (x + 8 * x_size > size_x || y + 8 * y_size > size_y)
+        return 0;
+    
+    /* Get the offset for the MOB (trying to optimize) */
+    *xo = -1;
+    *yo = -1;
+    for (y1 = y; y1 < y + 8; y1++) {
+        for (x1 = x; x1 < x + 8; x1++) {
+            if (bitmap[y1 * size_x + x1] == color)
+                break;
+        }
+        if (x1 < x + 8) {
+            *yo = y1 - y;
+            break;
+        }
+    }
+    if (*yo == -1)  /* Impossible case */
+        return 0;
+    for (x1 = x; x1 < x + 8; x1++) {
+        for (y1 = y + *yo; y1 < y + *yo + 8; y1++) {
+            if (bitmap[y1 * size_x + x1] == color)
+                break;
+        }
+        if (y1 < y + *yo + 8) {
+            *xo = x1 - x;
+            break;
+        }
+    }
+    if (*xo == -1)  /* Impossible case */
+        return 0;
+    x += *xo;
+    y += *yo;
+    if (x + 8 * x_size > size_x) {
+        x -= *xo;
+        *xo = 0;
+    }
+    if (y + 8 * y_size > size_y) {
+        y -= *yo;
+        *yo = 0;
+    }
+    
+    /* Initialize the bitmap */
+    memset(bit, 0, sizeof(bit));
+    for (y1 = y; y1 < y + 8 * y_size; y1 += y_size) {
+        for (x1 = x; x1 < x + 8 * x_size; x1 += x_size) {
+            current_used = &used_color[((y1 / 8 * size_x_cards) + (x1 / 8)) * 16];
+            c = 0;
+            for (c = 0; c < 16 && current_used[c] != -1; c++) {
+                if (current_used[c] == color)
+                    break;
+            }
+            if (c >= 16 || current_used[c] == -1)  /* Does use it the color? */
+                return 0;  /* No */
+            
+            /* Check that a whole pixel can be represented with the color */
+            c = 0;
+            for (y2 = 0; y2 < y_size; y2++) {
+                for (x2 = 0; x2 < x_size; x2++) {
+                    if (bitmap[(y1 + y2) * size_x + x1 + x2] == color)
+                        c++;
+                }
+            }
+            if (c > 0 && c < x_size * y_size)
+                return 0;
+            if (c == x_size * y_size)
+                bit[(y1 - y) / y_size] |= 0x80 >> ((x1 - x) / x_size);
+        }
+    }
+    fprintf(stderr, "Valid color %d,x=%d,y=%d,x_size=%d,y_size=%d (xo=%d,yo=%d)\n", color, x, y, x_size, y_size, *xo, *yo);
+    return 1;
+}
+
+/*
+** Try to optimize a bitmap using GROM
+*/
+int optimize_from_grom(int x, int y, int color_foreground, int color_background, int reverse)
+{
+    int c;
+    int d;
+    
+    if (memcmp(&bit[0], "\x00\x00\x00\x00\x00\x00\x00\x00", 8) == 0) {
+        c = 0;
+    } else {
+        if (grom_exists) {  /* Try to optimize output using GROM shapes */
+            if (stack_color) {
+                c = 256;
+                if (color_foreground < 8) {
+                    for (c = 0; c < 256; c++) {
+                        if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
+                            break;
+                    }
+                }
+                if (c == 256 && reverse) {
+                    for (d = 0; d < 8; d++)
+                        bit[d] = ~bit[d];
+                    if (color_background < 8 &&
+                        (color_foreground == stack[current_stack] || color_foreground == stack[(current_stack + 1) & 3])) {
+                        for (c = 0; c < 256; c++) {
+                            if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
+                                break;
+                        }
+                    }
+                    if (c == 256) {
+                        for (d = 0; d < 8; d++)
+                            bit[d] = ~bit[d];
+                        c = -1;
+                    } else {
+                        d = color_foreground;
+                        color_foreground = color_background;
+                        color_background = d;
+                    }
+                } else if (c == 256) {
+                    c = -1;
+                }
+            } else {
+                for (c = 0; c < 64; c++) {
+                    if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
+                        break;
+                }
+                if (c == 64 && reverse) {
+                    for (d = 0; d < 8; d++)
+                        bit[d] = ~bit[d];
+                    if (color_background < 8) {
+                        for (c = 0; c < 64; c++) {
+                            if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
+                                break;
+                        }
+                    }
+                    if (c == 64) {
+                        for (d = 0; d < 8; d++)
+                            bit[d] = ~bit[d];
+                        c = -1;
+                    } else {
+                        d = color_foreground;
+                        color_foreground = color_background;
+                        color_background = d;
+                    }
+                } else if (c == 64) {
+                    c = -1;
+                }
+            }
+        } else {
+            c = -1;
+        }
+        if (c == -1) {  /* Not in GROM? try to assign a GRAM card */
+            for (c = 0; c < number_bitmaps; c++) {
+                if (memcmp(&bitmaps[c * 8], &bit[0], 8) == 0)
+                    break;
+            }
+            if (c == number_bitmaps) {
+                
+                /* Try to search a complemented GRAM card */
+                if (reverse) {
+                    if ((stack_color && (color_background < 8 &&
+                                         (color_foreground == stack[current_stack] || color_foreground == stack[(current_stack + 1) & 3]))) ||
+                        (!stack_color && color_background < 8)) {
+                        for (d = 0; d < 8; d++)
+                            bit[d] = ~bit[d];
+                        for (c = 0; c < number_bitmaps; c++) {
+                            if (memcmp(&bitmaps[c * 8], &bit[0], 8) == 0)
+                                break;
+                        }
+                        if (c < number_bitmaps) {
+                            d = color_foreground;
+                            color_foreground = color_background;
+                            color_background = d;
+                        } else {
+                            for (d = 0; d < 8; d++)
+                                bit[d] = ~bit[d];
+                        }
+                    }
+                }
+                if (c == number_bitmaps) {
+                    if (number_bitmaps == 64) {
+                        fprintf(stderr, "More than 64 defined cards in block %d,%d\n",
+                                x, y);
+                        err_code = 1;
+                        c = 0;
+                    } else {
+                        memcpy(&bitmaps[c * 8], &bit[0], 8);
+                        number_bitmaps++;
+                    }
+                }
+            }
+            c += 256;
+        }
+    }
+    return c;
+}
+
+/*
+** Lookup for used colors
+*/
+void lookup_used_colors(int x, int y)
+{
+    char used[16];
+    int c;
+    int d;
+    signed char *current_used;
+    
+    /* Look for the colors in the block */
+    current_used = &used_color[((y / 8 * size_x_cards) + (x / 8)) * 16];
+    memset(current_used, -1, 16);
+    memset(used, 0, sizeof(used));
+    for (c = 0; c < 8; c++) {
+        for (d = 0; d < 8; d++) {
+            if (bitmap[(y + c) * size_x + x + d] < 16)
+                used[bitmap[(y + c) * size_x + x + d]] = 1;
+        }
+    }
+    if (stack_color) {
+        d = 0;
+        for (c = 0; c < 16; c++) {
+            if (c != stack[0] && c != stack[1] && c != stack[2] && c != stack[3])
+                continue;
+            if (used[c])
+                current_used[d++] = c;
+        }
+        for (c = 0; c < 16; c++) {
+            if (c == stack[0] || c == stack[1] || c == stack[2] || c == stack[3])
+                continue;
+            if (used[c])
+                current_used[d++] = c;
+        }
+    } else {
+        d = 0;
+        for (c = 0; c < 16; c++) {
+            if (used[c])
+                current_used[d++] = c;
+        }
+    }
+}
+
+/*
+** Main program
+*/
 int main(int argc, char *argv[])
 {
     FILE *a;
@@ -139,21 +403,24 @@ int main(int argc, char *argv[])
     int n;
     unsigned char buffer[54 + 1024];  /* Header and palette */
     unsigned short *ap;
-    int best_color;
-    int best_difference;
+    
     int arg;
-    int intybasic;
-    int stub;
-    int use_bitmap;
-    int use_print;
+    int intybasic = 0;
+    int use_bitmap = 0;
+    int use_print = 0;
+    int magic_mobs = 0;
+    int base_offset = 0;
+    int stub = 1;
     char *label = "screen";
-    int size_x;
-    int size_y;
-    int size_x_block;
-    int err_code;
-    int base_offset;
+    
     time_t actual;
     struct tm *date;
+    
+    signed char *current_used;
+    int e;
+    int color_foreground;
+    int color_background;
+    int mobs_found;
     
     actual = time(0);
     date = localtime(&actual);
@@ -166,9 +433,10 @@ int main(int argc, char *argv[])
         fprintf(stderr, "        Creates image for use with assembler code\n\n");
         fprintf(stderr, "    intycolor -b [-n] [-p] [-i] image.bmp image.bas [label]\n");
         fprintf(stderr, "        Creates image for use with IntyBASIC code\n\n");
-        fprintf(stderr, "    -n    Removes stub in IntyBASIC code\n");
-        fprintf(stderr, "    -p    Uses PRINT in IntyBASIC code\n");
+        fprintf(stderr, "    -n    Removes stub code for display in IntyBASIC mode\n");
+        fprintf(stderr, "    -p    Uses PRINT in IntyBASIC mode\n");
         fprintf(stderr, "    -o20  Starts offset for cards in 20 (0-63 is valid)\n");
+        fprintf(stderr, "    -m    Tries to use MOBs for more than 2 colors per card\n");
         fprintf(stderr, "    -i    Generates BITMAP statements instead of DATA\n\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -196,21 +464,15 @@ int main(int argc, char *argv[])
     }
     
     /* Process arguments */
-    intybasic = 0;
-    stack_color = 0;
-    use_bitmap = 0;
-    use_print = 0;
-    base_offset = 0;
-    stub = 1;
     arg = 1;
     while (arg < argc && argv[arg][0] == '-') {
         c = tolower(argv[arg][1]);
-        if (c == 'b')  /* -b IntyBASIC mode */
-            intybasic = 1;
+        if (c == 'm')  /* -m MOBs mode */
+            magic_mobs = 1;
         if (c == 'o')  /* -o11 Initial GRAM card number */
             base_offset = atoi(argv[arg] + 2);
-        if (c == 'p')  /* -p Use PRINT statement (IntyBASIC) */
-            use_print = 1;
+        if (c == 'b')  /* -b IntyBASIC mode */
+            intybasic = 1;
         if (c == 's') {  /* -s0000 Use Color Stack mode */
             stack_color = 1;
             if (strlen(argv[arg]) != 6) {
@@ -222,14 +484,24 @@ int main(int argc, char *argv[])
                 stack[3] = from_hex(argv[arg][5]);
             }
         }
-        if (c == 'n')  /* -n Remove stub from output */
-            stub = 0;
+        if (c == 'p')  /* -p Use PRINT statement (IntyBASIC) */
+            use_print = 1;
         if (c == 'i')  /* -i Use BITMAP instead of DATA (IntyBASIC) */
             use_bitmap = 1;
+        if (c == 'n')  /* -n Remove stub from output */
+            stub = 0;
         arg++;
     }
-    if (use_print || use_bitmap)
-        fprintf(stderr, "Warning: arguments -p and -i are ignored when in assembler mode");
+    if (!intybasic) {
+        if (use_print)
+            fprintf(stderr, "Warning: argument -p is ignored when in assembler mode\n");
+        if (use_bitmap)
+            fprintf(stderr, "Warning: argument -i is ignored when in assembler mode\n");
+        if (stub == 0)
+            fprintf(stderr, "Warning: argument -n is ignored when in assembler mode\n");
+        if (magic_mobs)
+            fprintf(stderr, "Warning: argument -m is ignored when in assembler mode\n");
+    }
     if (arg >= argc) {
         fprintf(stderr, "Missing input file name\n");
         exit(2);
@@ -285,23 +557,32 @@ int main(int argc, char *argv[])
         size_y = -size_y;
         n = 1;
     }
-    size_x_block = size_x / 8;
+    size_x_cards = size_x / 8;
+    size_y_cards = size_y / 8;
     bitmap = malloc(size_x * size_y * sizeof(char));
-    screen = malloc((size_x_block) * (size_y / 8) * sizeof(unsigned short));
-    if (bitmap == NULL || screen == NULL) {
+    screen = malloc(size_x_cards * size_y_cards * sizeof(unsigned short));
+    used_color = malloc(size_x_cards * size_y_cards * 16);
+    if (bitmap == NULL || screen == NULL || used_color == NULL) {
         if (bitmap != NULL)
             free(bitmap);
         if (screen != NULL)
             free(screen);
+        if (used_color != NULL)
+            free(used_color);
         fprintf(stderr, "Not enough memory for bitmap\n");
         fclose(a);
         exit(3);
     }
+    for (c = 0; c < size_x_cards * size_y_cards * 16; c++)
+        used_color[c] = -1;
     
     /* Read image and approximate any color to the local palette */
     fseek(a, buffer[10] | (buffer[11] << 8) | (buffer[12] << 16) | (buffer[13] << 24), SEEK_SET);
     for (y = n ? 0 : size_y - 1; n ? y < size_y : y >= 0; n ? y++ : y--) {
         for (x = 0; x < size_x; x++) {
+            int best_color;
+            int best_difference;
+
             if (buffer[0x1c] == 8) {            /* 256 color */
                 fread(buffer, 1, 1, a);
                 memcpy(buffer, buffer + 54 + buffer[0] * 4, 4);
@@ -326,76 +607,182 @@ int main(int argc, char *argv[])
     }
     fclose(a);
     
-    /* Generate the bitmap */
+    /* Make note of used colors per 8x8 block */
     err_code = 0;
     current_stack = 0;
     ap = screen;
     for (y = 0; y < size_y; y += 8) {
         for (x = 0; x < size_x; x += 8) {  /* For each 8x8 block */
-            
-            /* Look for the two colors */
-            best_color = -1;
-            best_difference = -1;
-            for (c = 0; c < 8; c++) {
-                for (d = 0; d < 8; d++) {
-                    if (bitmap[(y + c) * size_x + x + d] == best_color)
-                        ;
-                    else if (bitmap[(y + c) * size_x + x + d] == best_difference)
-                        ;
-                    else if (best_color == -1)
-                        best_color = bitmap[(y + c) * size_x + x + d];
-                    else if (best_difference == -1)
-                        best_difference = bitmap[(y + c) * size_x + x + d];
-                    else {
-                        fprintf(stderr, "Third color %d (before %d and %d) in block %d,%d\n", bitmap[(y + c) * size_x + x + d], best_color, best_difference, x, y);
-                        err_code = 1;
-                        break;
+            lookup_used_colors(x, y);
+        }
+    }
+
+    /* Generate automagically the MOBs */
+    if (magic_mobs) {
+        do {
+            mobs_found = 0;
+            for (y = 0; y < size_y; y += 8) {
+                for (x = 0; x < size_x; x += 8) {  /* For each 8x8 block */
+                    int best_size;
+                    int best_color;
+                    int best_xo;
+                    int best_yo;
+                    char best_bit[8];
+                    int xo;
+                    int yo;
+                    
+                    current_used = &used_color[((y / 8 * size_x_cards) + (x / 8)) * 16];
+                    if (current_used[2] == -1)  /* More than 2 colors? */
+                        continue;               /* No, continue */
+                    if (mob_pointer == 24)      /* All MOBs used? */
+                        continue;               /* Yes, continue */
+                    
+                    /* Create the biggest possible MOB from it */
+                    best_size = 0;
+                    best_color = 0;
+                    best_xo = 0;
+                    best_yo = 0;
+                    memset(best_bit, 0, sizeof(best_bit));
+                    for (n = 15; n >= 0; n--) {
+                        if (current_used[n] == -1)
+                            continue;
+                        if (check_for_valid(current_used[n], x, y, 2, 4, &xo, &yo)) {
+                            if (2 * 4 > best_size || xo > best_xo || yo > best_yo) {
+                                best_size = 0x524;
+                                best_color = current_used[n];
+                                best_xo = xo;
+                                best_yo = yo;
+                                memcpy(best_bit, bit, sizeof(best_bit));
+                            }
+                        } else if (check_for_valid(current_used[n], x, y, 2, 2, &xo, &yo)) {
+                            if (2 * 2 > best_size || xo > best_xo || yo > best_yo) {
+                                best_size = 0x422;
+                                best_color = current_used[n];
+                                best_xo = xo;
+                                best_yo = yo;
+                                memcpy(best_bit, bit, sizeof(best_bit));
+                            }
+                        } else if (check_for_valid(current_used[n], x, y, 1, 4, &xo, &yo)) {
+                            if (1 * 4 > best_size || xo > best_xo || yo > best_yo) {
+                                best_size = 0x314;
+                                best_color = current_used[n];
+                                best_xo = xo;
+                                best_yo = yo;
+                                memcpy(best_bit, bit, sizeof(best_bit));
+                            }
+                        } else if (check_for_valid(current_used[n], x, y, 2, 1, &xo, &yo)) {
+                            if (2 * 1 > best_size || xo > best_xo || yo > best_yo) {
+                                best_size = 0x221;
+                                best_color = current_used[n];
+                                best_xo = xo;
+                                best_yo = yo;
+                                memcpy(best_bit, bit, sizeof(best_bit));
+                            }
+                        } else if (check_for_valid(current_used[n], x, y, 1, 2, &xo, &yo)) {
+                            if (1 * 2 > best_size || xo > best_xo || yo > best_yo) {
+                                best_size = 0x112;
+                                best_color = current_used[n];
+                                best_xo = xo;
+                                best_yo = yo;
+                                memcpy(best_bit, bit, sizeof(best_bit));
+                            }
+                        } else if (check_for_valid(current_used[n], x, y, 1, 1, &xo, &yo)) {
+                            if (1 * 1 > best_size || xo > best_xo || yo > best_yo) {
+                                best_size = 0x011;
+                                best_color = current_used[n];
+                                best_xo = xo;
+                                best_yo = yo;
+                                memcpy(best_bit, bit, sizeof(best_bit));
+                            }
+                        }
                     }
+                    for (d = best_yo; d < (best_size & 15) * 8 + best_yo; d++) {
+                        for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c++) {
+                            if (bitmap[(y + d) * size_x + (x + c)] == best_color)
+                                bitmap[(y + d) * size_x + (x + c)] = -1;
+                        }
+                    }
+                    for (d = best_yo; d < (best_size & 15) * 8 + best_yo; d += 7) {
+                        for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c += 7) {
+                            lookup_used_colors((x + c) & -8, (y + d) & -8);
+                        }
+                    }
+                    memcpy(bit, best_bit, 8);
+                    c = optimize_from_grom(x, y, best_color, 0, 0);
+                    if (c >= 256)
+                        c += base_offset;
+                    mobs[mob_pointer++] = (x + 8 + best_xo) | 0x0200 | ((best_size & 0xf0) == 0x20 ? 0x0400 : 0);
+                    mobs[mob_pointer++] = (y + 8 + best_yo) | ((best_size & 0x0f) != 0x04 ? (best_size & 0x0f) != 0x02 ? 0x0100 : 0x0200 : 0x0300);
+                    mobs[mob_pointer++] = (c << 3) | (best_color & 7) | ((best_color & 8) << 9);
+                    mobs_found = 1;
                 }
             }
+        } while (mobs_found) ;
+    }
+    
+    /* Generate the bitmap */
+    for (y = 0; y < size_y; y += 8) {
+        for (x = 0; x < size_x; x += 8) {  /* For each 8x8 block */
+            /* Per mode */
+            current_used = &used_color[((y / 8 * size_x_cards) + (x / 8)) * 16];
+            if (current_used[2] != -1) {  /* Too many colors in block */
+                fprintf(stderr, "Too many colors in block %d,%d (", x, y);
+                for (e = 0; e < 16 && current_used[e] != -1; e++) {
+                    if (e)
+                        fprintf(stderr, ",");
+                    fprintf(stderr, "%d", current_used[e]);
+                }
+                fprintf(stderr, ")\n");
+                err_code = 1;
+                break;
+            }
+            color_foreground = current_used[0];
+            if (color_foreground == -1)
+                color_foreground = 1;
+            color_background = current_used[1];  /* Note it can be -1 */
             
             /* Align color per mode */
             if (stack_color) {
-                if (best_color == stack[current_stack]
-                    && best_difference != -1) {
-                    c = best_color;
-                    best_color = best_difference;
-                    best_difference = c;
+                if (color_foreground == stack[current_stack]
+                    && color_background != -1) {
+                    c = color_foreground;
+                    color_foreground = color_background;
+                    color_background = c;
                 }
-                if (best_color == stack[(current_stack + 1) & 3]
-                    && best_difference != stack[current_stack]) {
-                    c = best_color;
-                    best_color = best_difference;
-                    best_difference = c;
+                if (color_foreground == stack[(current_stack + 1) & 3]
+                    && color_background != stack[current_stack]) {
+                    c = color_foreground;
+                    color_foreground = color_background;
+                    color_background = c;
                 }
-                if (best_difference != -1
-                    && best_difference != stack[current_stack]
-                    && best_difference != stack[(current_stack + 1) & 3]) {
+                if (color_background != -1
+                    && color_background != stack[current_stack]
+                    && color_background != stack[(current_stack + 1) & 3]) {
                     fprintf(stderr,
                             "Background color %d not aligned with color stack (%d or %d) in block %d,%d\n",
-                            best_difference, stack[current_stack], stack[(current_stack + 1) & 3], x, y);
+                            color_background, stack[current_stack], stack[(current_stack + 1) & 3], x, y);
                     err_code = 1;
                 }
             } else {
-                if (best_color > 7) {
-                    c = best_color;
-                    best_color = best_difference;
-                    best_difference = c;
+                if (color_foreground > 7) {
+                    c = color_foreground;
+                    color_foreground = color_background;
+                    color_background = c;
                 }
-                if (best_color > 7) {
+                if (color_foreground > 7) {
                     fprintf(stderr,
                             "Foreground color %d outside of primary colors in block %d,%d\n",
-                            best_color, x, y);
+                            color_foreground, x, y);
                     err_code = 1;
                 }
-                if (best_difference == -1) {
-                    best_difference = best_color;
-                    best_color = -1;
+                if (color_background == -1) {
+                    color_background = color_foreground;
+                    color_foreground = -1;
                 }
-                if (best_color == 0 && best_difference != -1 && best_difference < 8) {
-                    c = best_color;
-                    best_color = best_difference;
-                    best_difference = c;
+                if (color_foreground == 0 && color_background != -1 && color_background < 8) {
+                    c = color_foreground;
+                    color_foreground = color_background;
+                    color_background = c;
                 }
             }
             
@@ -403,131 +790,31 @@ int main(int argc, char *argv[])
             for (c = 0; c < 8; c++) {
                 bit[c] = 0;
                 for (d = 0; d < 8; d++) {
-                    if (bitmap[(y + c) * size_x + x + d] == best_color)
+                    if (bitmap[(y + c) * size_x + x + d] == color_foreground)
                         bit[c] |= 0x80 >> d;
                 }
             }
-            if (memcmp(&bit[0], "\x00\x00\x00\x00\x00\x00\x00\x00", 8) == 0) {
-                c = 0;
-            } else {
-                if (grom_exists) {  /* Try to optimize output using GROM shapes */
-                    if (stack_color) {
-                        c = 256;
-                        if (best_color < 8) {
-                            for (c = 0; c < 256; c++) {
-                                if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
-                                    break;
-                            }
-                        }
-                        if (c == 256) {
-                            for (d = 0; d < 8; d++)
-                                bit[d] = ~bit[d];
-                            if (best_difference < 8 &&
-                                (best_color == stack[current_stack] || best_color == stack[(current_stack + 1) & 3])) {
-                                for (c = 0; c < 256; c++) {
-                                    if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
-                                        break;
-                                }
-                            }
-                            if (c == 256) {
-                                for (d = 0; d < 8; d++)
-                                    bit[d] = ~bit[d];
-                                c = -1;
-                            } else {
-                                d = best_color;
-                                best_color = best_difference;
-                                best_difference = d;
-                            }
-                        }
-                    } else {
-                        for (c = 0; c < 64; c++) {
-                            if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
-                                break;
-                        }
-                        if (c == 64) {
-                            for (d = 0; d < 8; d++)
-                                bit[d] = ~bit[d];
-                            if (best_difference < 8) {
-                                for (c = 0; c < 64; c++) {
-                                    if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
-                                        break;
-                                }
-                            }
-                            if (c == 64) {
-                                for (d = 0; d < 8; d++)
-                                    bit[d] = ~bit[d];
-                                c = -1;
-                            } else {
-                                d = best_color;
-                                best_color = best_difference;
-                                best_difference = d;
-                            }
-                        }
-                    }
-                } else {
-                    c = -1;
-                }
-                if (c == -1) {  /* Not in GROM? try to assign a GRAM card */
-                    for (c = 0; c < number_bitmaps; c++) {
-                        if (memcmp(&bitmaps[c * 8], &bit[0], 8) == 0)
-                            break;
-                    }
-                    if (c == number_bitmaps) {
-                        
-                        /* Try to search a complemented GRAM card */
-                        if ((stack_color && (best_difference < 8 &&
-                                             (best_color == stack[current_stack] || best_color == stack[(current_stack + 1) & 3]))) ||
-                            (!stack_color && best_difference < 8)) {
-                            for (d = 0; d < 8; d++)
-                                bit[d] = ~bit[d];
-                            for (c = 0; c < number_bitmaps; c++) {
-                                if (memcmp(&bitmaps[c * 8], &bit[0], 8) == 0)
-                                    break;
-                            }
-                            if (c < number_bitmaps) {
-                                d = best_color;
-                                best_color = best_difference;
-                                best_difference = d;
-                            } else {
-                                for (d = 0; d < 8; d++)
-                                    bit[d] = ~bit[d];
-                            }
-                        }
-                        if (c == number_bitmaps) {
-                            if (number_bitmaps == 64) {
-                                fprintf(stderr, "More than 64 defined cards in block %d,%d\n",
-                                        x, y);
-                                err_code = 1;
-                                c = 0;
-                            } else {
-                                memcpy(&bitmaps[c * 8], &bit[0], 8);
-                                number_bitmaps++;
-                            }
-                        }
-                    }
-                    c += 256;
-                }
-            }
-            if (best_color == -1)
-                best_color = 0;
+            c = optimize_from_grom(x, y, color_foreground, color_background, 1);
+            if (color_foreground == -1)
+                color_foreground = 0;
             if (c >= 256)
                 c += base_offset;
             
             /* Generate final value for BACKTAB */
             if (stack_color) {
-                if (best_difference == stack[current_stack])
+                if (color_background == stack[current_stack])
                     d = 0;
-                else if (best_difference == stack[(current_stack + 1) & 3]) {
+                else if (color_background == stack[(current_stack + 1) & 3]) {
                     d = 0x2000;
                     current_stack = (current_stack + 1) & 3;
                 } else {
                     d = 0;
                 }
-                *ap++ = (c << 3) | (best_color & 7) | ((best_color & 8) << 9) | d;
+                *ap++ = (c << 3) | (color_foreground & 7) | ((color_foreground & 8) << 9) | d;
             } else {
-                if (best_difference == -1)
-                    best_difference = 0;
-                *ap++ = (c << 3) | best_color | ((best_difference & 3) << 9) | ((best_difference & 0x04) << 11) | ((best_difference & 0x08) << 9);
+                if (color_background == -1)
+                    color_background = 0;
+                *ap++ = (c << 3) | color_foreground | ((color_background & 3) << 9) | ((color_background & 0x04) << 11) | ((color_background & 0x08) << 9);
             }
         }
     }
@@ -576,32 +863,37 @@ int main(int argc, char *argv[])
                         (c + BLOCK_SIZE) >= number_bitmaps ? number_bitmaps - c : BLOCK_SIZE,
                         label, c / BLOCK_SIZE);
             }
+            if (magic_mobs) {
+                for (c = 0; c < mob_pointer; c += 3) {
+                    fprintf(a, "\tSPRITE %d,$%04x,$%04x,$%04x\n", c / 3, mobs[c], mobs[c + 1], mobs[c + 2]);
+                }
+            }
             fprintf(a, "\tWAIT\n");
             if (use_print) {
-                for (c = 0; c < size_x_block * (size_y / 8); c++) {
-                    if (c >= size_x_block * 12)         /* Avoid writing off-screen */
+                for (c = 0; c < size_x_cards * size_y_cards; c++) {
+                    if (c >= size_x_cards * 12)         /* Avoid writing off-screen */
                         fprintf(a, "'");
-                    if (c % size_x_block == 0)
-                        fprintf(a, "\tPRINT AT %d,", c / size_x_block * 20);
+                    if (c % size_x_cards == 0)
+                        fprintf(a, "\tPRINT AT %d,", c / size_x_cards * 20);
                     fprintf(a, "$%04X", screen[c]);
-                    if (c % size_x_block == size_x_block - 1 || c + 1 == size_x_block * (size_y / 8)) {
+                    if (c % size_x_cards == size_x_cards - 1 || c + 1 == size_x_cards * size_y_cards) {
                         fprintf(a, "\n");
                     } else {
-                        if (c % size_x_block == 20)     /* Avoid writing off-screen */
+                        if (c % size_x_cards == 20)     /* Avoid writing off-screen */
                             fprintf(a, "'");
                         fprintf(a, ",");
                     }
                 }
             } else {
                 if (size_x != 160) {
-                    fprintf(a, "\tFOR y = 0 TO %d\n", size_y / 8 < 12 ? size_y / 8 - 1 : 11);
-                    fprintf(a, "\tFOR x = 0 TO %d\n", size_x_block < 20 ? size_x_block - 1 : 19);
-                    fprintf(a, "\tPRINT AT y * 20 + x,%s_cards(y * %d + x)\n", label, size_x_block);
+                    fprintf(a, "\tFOR y = 0 TO %d\n", size_y_cards < 12 ? size_y_cards - 1 : 11);
+                    fprintf(a, "\tFOR x = 0 TO %d\n", size_x_cards < 20 ? size_x_cards - 1 : 19);
+                    fprintf(a, "\tPRINT AT y * 20 + x,%s_cards(y * %d + x)\n", label, size_x_cards);
                     fprintf(a, "\tNEXT x\n");
                     fprintf(a, "\tNEXT y\n");
                 } else {
                     if (size_y < 96)
-                        fprintf(a, "\tSCREEN %s_cards,0,0,20,%d\n", label, size_y / 8);
+                        fprintf(a, "\tSCREEN %s_cards,0,0,20,%d\n", label, size_y_cards);
                     else
                         fprintf(a, "\tSCREEN %s_cards\n", label);
                 }
@@ -632,13 +924,13 @@ int main(int argc, char *argv[])
         }
         fprintf(a, "\n");
         if (!use_print) {
-            fprintf(a, "\tREM %dx%d cards\n", size_x_block, size_y / 8);
+            fprintf(a, "\tREM %dx%d cards\n", size_x_cards, size_y_cards);
             fprintf(a, "%s_cards:\n", label);
-            for (c = 0; c < size_x_block * (size_y / 8); c++) {
-                if (c % size_x_block == 0)
+            for (c = 0; c < size_x_cards * size_y_cards; c++) {
+                if (c % size_x_cards == 0)
                     fprintf(a, "\tDATA ");
                 fprintf(a, "$%04X", screen[c]);
-                if (c % size_x_block == size_x_block - 1 || c + 1 == size_x_block * (size_y / 8))
+                if (c % size_x_cards == size_x_cards - 1 || c + 1 == size_x_cards * size_y_cards)
                     fprintf(a, "\n");
                 else
                     fprintf(a, ",");
@@ -670,13 +962,13 @@ int main(int argc, char *argv[])
         }
         fprintf(a, "\t; End %s_bitmaps\n", label);
         fprintf(a, "\t\n");
-        fprintf(a, "\t; %dx%d cards\n", size_x_block, size_y / 8);
+        fprintf(a, "\t; %dx%d cards\n", size_x_cards, size_y_cards);
         fprintf(a, "%s_cards:\n", label);
-        for (c = 0; c < size_x_block * (size_y / 8); c++) {
-            if (c % size_x_block == 0)
+        for (c = 0; c < size_x_cards * size_y_cards; c++) {
+            if (c % size_x_cards == 0)
                 fprintf(a, "\tDECLE ");
             fprintf(a, "$%04X", screen[c]);
-            if (c % size_x_block == size_x_block - 1 || c + 1 == size_x_block * (size_y / 8))
+            if (c % size_x_cards == size_x_cards - 1 || c + 1 == size_x_cards * size_y_cards)
                 fprintf(a, "\n");
             else
                 fprintf(a, ",");
@@ -686,3 +978,4 @@ int main(int argc, char *argv[])
     free(bitmap);
     return 0;
 }
+
