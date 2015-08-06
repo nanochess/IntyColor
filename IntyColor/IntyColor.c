@@ -225,7 +225,7 @@ int check_for_valid(int color, int x, int y, int x_size, int y_size, int *xo, in
                 bit[(y1 - y) / y_size] |= 0x80 >> ((x1 - x) / x_size);
         }
     }
-    fprintf(stderr, "Valid color %d,x=%d,y=%d,x_size=%d,y_size=%d (xo=%d,yo=%d)\n", color, x, y, x_size, y_size, *xo, *yo);
+/*    fprintf(stderr, "Valid color %d,x=%d,y=%d,x_size=%d,y_size=%d (xo=%d,yo=%d)\n", color, x, y, x_size, y_size, *xo, *yo);*/
     return 1;
 }
 
