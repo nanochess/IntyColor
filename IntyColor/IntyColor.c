@@ -48,6 +48,9 @@
 //                         Added support for flip X/Y in MOB. Now uses
 //                         constants.bas to document MOB output. New option
 //                         -c to not use constants.bas.
+//  Revision: Aug/06/2015. Bunch of conversion errors now to stdout. New
+//                         option -r to generate a report BMP file to show
+//                         where are the problems.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,7 +58,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v0.9 Aug/05/2015"     /* Software version */
+#define VERSION "v0.9 Aug/06/2015"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
@@ -88,15 +91,15 @@ int mob_pointer;
 int err_code;
 
 /*
-** The 16 colors available in Intellivision
-*/
+ ** The 16 colors available in Intellivision
+ */
 unsigned char colors[16 * 3] = {
     /*R*/ /*G*/ /*B*/
     0x00, 0x00, 0x00,  /* Black */
     0x00, 0x2d, 0xff,  /* Red */
     0xff, 0x3d, 0x10,  /* Blue */
     0xc9, 0xcf, 0xab,  /* Tan */
-
+    
     0x38, 0x6b, 0x3f,  /* Dark green */
     0x00, 0xa7, 0x56,  /* Green */
     0xfa, 0xea, 0x50,  /* Yellow */
@@ -114,8 +117,8 @@ unsigned char colors[16 * 3] = {
 };
 
 /*
-** Converts from hexadecimal
-*/
+ ** Converts from hexadecimal
+ */
 int from_hex(int letter)
 {
     letter = toupper(letter);
@@ -130,8 +133,8 @@ int from_hex(int letter)
 }
 
 /*
-** Converts a byte to a binary string
-*/
+ ** Converts a byte to a binary string
+ */
 char *binary(int data)
 {
     static char string[9];
@@ -228,13 +231,13 @@ int check_for_valid(int color, int x, int y, int x_size, int y_size, int *xo, in
                 bit[(y1 - y) / y_size] |= 0x80 >> ((x1 - x) / x_size);
         }
     }
-/*    fprintf(stderr, "Valid color %d,x=%d,y=%d,x_size=%d,y_size=%d (xo=%d,yo=%d)\n", color, x, y, x_size, y_size, *xo, *yo);*/
+    /*    fprintf(stderr, "Valid color %d,x=%d,y=%d,x_size=%d,y_size=%d (xo=%d,yo=%d)\n", color, x, y, x_size, y_size, *xo, *yo);*/
     return 1;
 }
 
 /*
-** Search for a bitmap in a table
-*/
+ ** Search for a bitmap in a table
+ */
 int search_bitmap(unsigned char *bitmap, unsigned char *table, int size)
 {
     int c;
@@ -247,14 +250,14 @@ int search_bitmap(unsigned char *bitmap, unsigned char *table, int size)
 }
 
 /*
-** Mirror horizontally a 8x8 bitmap
-*/
+ ** Mirror horizontally a 8x8 bitmap
+ */
 void mirror_x(unsigned char *bitmap)
 {
     int c;
     int d;
     int v;
-
+    
     for (c = 0; c < 8; c++) {
         v = 0;
         for (d = 0; d < 8; d++)
@@ -279,8 +282,8 @@ void mirror_y(unsigned char *bitmap)
 }
 
 /*
-** Try to optimize a bitmap using GROM
-*/
+ ** Try to optimize a bitmap using GROM
+ */
 int optimize_from_grom(int x, int y, int color_foreground, int color_background, int reverse, int *yo)
 {
     int c;
@@ -448,8 +451,8 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
 }
 
 /*
-** Lookup for used colors
-*/
+ ** Lookup for used colors
+ */
 void lookup_used_colors(int x, int y)
 {
     char used[16];
@@ -491,8 +494,23 @@ void lookup_used_colors(int x, int y)
 }
 
 /*
-** Main program
-*/
+ ** Mark usage of card
+ */
+void mark_usage(int x, int y, int flags)
+{
+    int c;
+    int d;
+    
+    for (d = 0; d < 8; d++) {
+        for (c = 0; c < 8; c++) {
+            bitmap[(y + d) * size_x + x + c] |= flags;
+        }
+    }
+}
+
+/*
+ ** Main program
+ */
 int main(int argc, char *argv[])
 {
     FILE *a;
@@ -512,6 +530,7 @@ int main(int argc, char *argv[])
     int base_offset = 0;
     int use_constants = 1;
     int stub = 1;
+    int generate_report = 0;
     char *label = "screen";
     
     time_t actual;
@@ -522,6 +541,7 @@ int main(int argc, char *argv[])
     int color_foreground;
     int color_background;
     int mobs_found;
+    int total_errors;
     
     actual = time(0);
     date = localtime(&actual);
@@ -539,7 +559,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "    -o20  Starts offset for cards in 20 (0-63 is valid)\n");
         fprintf(stderr, "    -m    Tries to use MOBs for more than 2 colors per card\n");
         fprintf(stderr, "    -c    Doesn't use constants.bas for -m option\n");
-        fprintf(stderr, "    -i    Generates BITMAP statements instead of DATA\n\n");
+        fprintf(stderr, "    -i    Generates BITMAP statements instead of DATA\n");
+        fprintf(stderr, "    -r    Generate BMP report of conversion intycolor_report.bmp\n\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
         fprintf(stderr, "colors and 16 background colors for each 8x8 block.\n\n");
@@ -594,6 +615,8 @@ int main(int argc, char *argv[])
             use_bitmap = 1;
         if (c == 'n')  /* -n Remove stub from output */
             stub = 0;
+        if (c == 'r')  /* -r Generate report */
+            generate_report = 1;
         arg++;
     }
     if (!intybasic) {
@@ -689,7 +712,7 @@ int main(int argc, char *argv[])
         for (x = 0; x < size_x; x++) {
             int best_color;
             int best_difference;
-
+            
             if (buffer[0x1c] == 8) {            /* 256 color */
                 fread(buffer, 1, 1, a);
                 memcpy(buffer, buffer + 54 + buffer[0] * 4, 4);
@@ -723,7 +746,7 @@ int main(int argc, char *argv[])
             lookup_used_colors(x, y);
         }
     }
-
+    
     /* Generate automagically the MOBs */
     if (magic_mobs) {
         do {
@@ -828,20 +851,22 @@ int main(int argc, char *argv[])
     }
     
     /* Generate the bitmap */
+    total_errors = 0;
     for (y = 0; y < size_y; y += 8) {
         for (x = 0; x < size_x; x += 8) {  /* For each 8x8 block */
             /* Per mode */
             current_used = &used_color[((y / 8 * size_x_cards) + (x / 8)) * 16];
             if (current_used[2] != -1) {  /* Too many colors in block */
-                fprintf(stderr, "Too many colors in block %d,%d (", x, y);
+                fprintf(stdout, "Too many colors in block x=%d,y=%d (", x, y);
                 for (e = 0; e < 16 && current_used[e] != -1; e++) {
                     if (e)
-                        fprintf(stderr, ",");
-                    fprintf(stderr, "%d", current_used[e]);
+                        fprintf(stdout, ",");
+                    fprintf(stdout, "%d", current_used[e]);
                 }
-                fprintf(stderr, ")\n");
+                fprintf(stdout, ")\n");
                 err_code = 1;
-                break;
+                total_errors++;
+                mark_usage(x, y, 0x10);
             }
             color_foreground = current_used[0];
             if (color_foreground == -1)
@@ -865,10 +890,12 @@ int main(int argc, char *argv[])
                 if (color_background != -1
                     && color_background != stack[current_stack]
                     && color_background != stack[(current_stack + 1) & 3]) {
-                    fprintf(stderr,
-                            "Background color %d not aligned with color stack (%d or %d) in block %d,%d\n",
+                    fprintf(stdout,
+                            "Background color %d not aligned with color stack (%d or %d) in block x=%d,y=%d\n",
                             color_background, stack[current_stack], stack[(current_stack + 1) & 3], x, y);
                     err_code = 1;
+                    total_errors++;
+                    mark_usage(x, y, 0x10);
                 }
             } else {
                 if (color_foreground > 7) {
@@ -877,10 +904,12 @@ int main(int argc, char *argv[])
                     color_background = c;
                 }
                 if (color_foreground > 7) {
-                    fprintf(stderr,
-                            "Foreground color %d outside of primary colors in block %d,%d\n",
+                    fprintf(stdout,
+                            "Foreground color %d outside of primary colors in block x=%d,y=%d\n",
                             color_foreground, x, y);
                     err_code = 1;
+                    total_errors++;
+                    mark_usage(x, y, 0x10);
                 }
                 if (color_background == -1) {
                     color_background = color_foreground;
@@ -897,15 +926,18 @@ int main(int argc, char *argv[])
             for (c = 0; c < 8; c++) {
                 bit[c] = 0;
                 for (d = 0; d < 8; d++) {
-                    if (bitmap[(y + c) * size_x + x + d] == color_foreground)
+                    if ((bitmap[(y + c) * size_x + x + d] & 0x0f) == color_foreground)
                         bit[c] |= 0x80 >> d;
                 }
             }
             c = optimize_from_grom(x, y, color_foreground, color_background, 1, NULL);
             if (color_foreground == -1)
                 color_foreground = 0;
-            if (c >= 256)
+            if (c >= 256) {
                 c += base_offset;
+            } else {
+                mark_usage(x, y, 0x20);
+            }
             
             /* Generate final value for BACKTAB */
             if (stack_color) {
@@ -923,6 +955,74 @@ int main(int argc, char *argv[])
                     color_background = 0;
                 *ap++ = (c << 3) | color_foreground | ((color_background & 3) << 9) | ((color_background & 0x04) << 11) | ((color_background & 0x08) << 9);
             }
+        }
+    }
+    if (total_errors > 1)
+        fprintf(stderr, "Found %d errors while converting image.\n", total_errors);
+    else if (total_errors == 1)
+        fprintf(stderr, "Found %d error while converting image.\n", total_errors);
+    
+    /* Generate report file */
+    if (generate_report) {
+        a = fopen("intycolor_report.bmp", "wb");
+        if (a == NULL) {
+            fprintf(stderr, "Unable to open report file intycolor_report.bmp\n");
+            err_code = 2;
+        } else {
+            char header[54];
+            
+            memset(header, 0, sizeof(header));
+            header[0x00] = 'B';     /* Header */
+            header[0x01] = 'M';
+            c = size_x * size_y * 3 + 54;
+            header[0x02] = c;       /* Complete size of file */
+            header[0x03] = c >> 8;
+            header[0x04] = c >> 16;
+            header[0x05] = c >> 24;
+            c = 54;
+            header[0x0a] = c;       /* Size of header plus palette */
+            c = 40;
+            header[0x0e] = c;       /* Size of header */
+            header[0x12] = size_x;
+            header[0x13] = size_x >> 8;
+            header[0x16] = size_y;
+            header[0x17] = size_y >> 8;
+            header[0x1a] = 0x01;    /* 1 plane */
+            header[0x1c] = 0x18;    /* 24 bits */
+            c = size_x * size_y * 3;
+            header[0x22] = c;       /* Complete size of file */
+            header[0x23] = c >> 8;
+            header[0x24] = c >> 16;
+            header[0x25] = c >> 24;
+            c = 0x0ec4;             /* 96 dpi */
+            header[0x26] = c;       /* X */
+            header[0x27] = c >> 8;
+            header[0x2a] = c;       /* Y */
+            header[0x2b] = c >> 8;
+            fwrite(header, 1, sizeof(header), a);
+            for (y = size_y - 1; y >= 0; y--) {
+                for (x = 0; x < size_x; x++) {
+                    header[0x00] = colors[(bitmap[y * size_x + x] & 0x0f) * 3];
+                    header[0x01] = colors[(bitmap[y * size_x + x] & 0x0f) * 3 + 1];
+                    header[0x02] = colors[(bitmap[y * size_x + x] & 0x0f) * 3 + 2];
+                    c = (header[0x00] * 30 + header[0x01] * 59 + header[0x02] * 11) / 100;
+                    if (bitmap[y * size_x + x] & 0x10) {  /* Error in red */
+                        header[0x00] = 0;
+                        header[0x01] = 0;
+                        header[0x02] = c;
+                    } else if (bitmap[y * size_x + x] & 0x20) {  /* GROM in cyan */
+                        header[0x00] = c;
+                        header[0x01] = c;
+                        header[0x02] = 0;
+                    } else {  /* GRAM in green */
+                        header[0x00] = 0;
+                        header[0x01] = c;
+                        header[0x02] = 0;
+                    }
+                    fwrite(header, 1, 3, a);
+                }
+            }
+            fclose(a);
         }
     }
     
@@ -1070,10 +1170,10 @@ int main(int argc, char *argv[])
                 fprintf(a, "\tBITMAP \"%s\"\n\n", binary(bitmaps[c * 8 + 7]));
             } else {
                 fprintf(a, "\tDATA $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\n",
-                      bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
-                      bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
-                      bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
-                      bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
+                        bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
+                        bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
+                        bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
+                        bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
             }
         }
         fprintf(a, "\n");
