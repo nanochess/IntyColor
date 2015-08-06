@@ -45,6 +45,9 @@
 //                         automagical 8x8 MOB use for 3 or more colors
 //                         support per card.
 //  Revision: Aug/05/2015. Prefers a deeper X/Y offset to optimize MOB usage.
+//                         Added support for flip X/Y in MOB. Now uses
+//                         constants.bas to document MOB output. New option
+//                         -c to not use constants.bas.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -230,9 +233,55 @@ int check_for_valid(int color, int x, int y, int x_size, int y_size, int *xo, in
 }
 
 /*
+** Search for a bitmap in a table
+*/
+int search_bitmap(unsigned char *bitmap, unsigned char *table, int size)
+{
+    int c;
+    
+    for (c = 0; c < size; c++) {
+        if (memcmp(&table[c * 8], &bitmap[0], 8) == 0)
+            return c;
+    }
+    return size;
+}
+
+/*
+** Mirror horizontally a 8x8 bitmap
+*/
+void mirror_x(unsigned char *bitmap)
+{
+    int c;
+    int d;
+    int v;
+
+    for (c = 0; c < 8; c++) {
+        v = 0;
+        for (d = 0; d < 8; d++)
+            v |= ((bitmap[c] >> d) & 1) << (7 - d);
+        bitmap[c] = v;
+    }
+}
+
+/*
+ ** Mirror vertically a 8x8 bitmap
+ */
+void mirror_y(unsigned char *bitmap)
+{
+    int c;
+    int v;
+    
+    for (c = 0; c < 4; c++) {
+        v = bitmap[7 - c];
+        bitmap[7 - c] = bitmap[c];
+        bitmap[c] = v;
+    }
+}
+
+/*
 ** Try to optimize a bitmap using GROM
 */
-int optimize_from_grom(int x, int y, int color_foreground, int color_background, int reverse)
+int optimize_from_grom(int x, int y, int color_foreground, int color_background, int reverse, int *yo)
 {
     int c;
     int d;
@@ -244,20 +293,37 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
             if (stack_color) {
                 c = 256;
                 if (color_foreground < 8) {
-                    for (c = 0; c < 256; c++) {
-                        if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
-                            break;
+                    c = search_bitmap(&bit[0], grom, 256);
+                    if (c == 256 && reverse == 2) {
+                        mirror_x(&bit[0]);
+                        c = search_bitmap(&bit[0], grom, 256);
+                        if (c != 256)
+                            *yo |= 0x0400;  /* X-flip */
+                        mirror_x(&bit[0]);
+                    }
+                    if (c == 256 && reverse == 2) {
+                        mirror_y(&bit[0]);
+                        c = search_bitmap(&bit[0], grom, 256);
+                        if (c != 256)
+                            *yo |= 0x0800;  /* Y-flip */
+                        mirror_y(&bit[0]);
+                    }
+                    if (c == 256 && reverse == 2) {
+                        mirror_x(&bit[0]);
+                        mirror_y(&bit[0]);
+                        c = search_bitmap(&bit[0], grom, 256);
+                        if (c != 256)
+                            *yo |= 0x0c00;  /* Y-flip */
+                        mirror_x(&bit[0]);
+                        mirror_y(&bit[0]);
                     }
                 }
-                if (c == 256 && reverse) {
+                if (c == 256 && reverse == 1) {
                     for (d = 0; d < 8; d++)
                         bit[d] = ~bit[d];
                     if (color_background < 8 &&
                         (color_foreground == stack[current_stack] || color_foreground == stack[(current_stack + 1) & 3])) {
-                        for (c = 0; c < 256; c++) {
-                            if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
-                                break;
-                        }
+                        c = search_bitmap(&bit[0], grom, 256);
                     }
                     if (c == 256) {
                         for (d = 0; d < 8; d++)
@@ -272,18 +338,35 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                     c = -1;
                 }
             } else {
-                for (c = 0; c < 64; c++) {
-                    if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
-                        break;
+                c = search_bitmap(&bit[0], grom, 64);
+                if (c == 64 && reverse == 2) {
+                    mirror_x(&bit[0]);
+                    c = search_bitmap(&bit[0], grom, 64);
+                    if (c != 256)
+                        *yo |= 0x0400;  /* X-flip */
+                    mirror_x(&bit[0]);
                 }
-                if (c == 64 && reverse) {
+                if (c == 64 && reverse == 2) {
+                    mirror_y(&bit[0]);
+                    c = search_bitmap(&bit[0], grom, 64);
+                    if (c != 256)
+                        *yo |= 0x0800;  /* Y-flip */
+                    mirror_y(&bit[0]);
+                }
+                if (c == 64 && reverse == 2) {
+                    mirror_x(&bit[0]);
+                    mirror_y(&bit[0]);
+                    c = search_bitmap(&bit[0], grom, 64);
+                    if (c != 256)
+                        *yo |= 0x0c00;  /* Y-flip */
+                    mirror_x(&bit[0]);
+                    mirror_y(&bit[0]);
+                }
+                if (c == 64 && reverse == 1) {
                     for (d = 0; d < 8; d++)
                         bit[d] = ~bit[d];
                     if (color_background < 8) {
-                        for (c = 0; c < 64; c++) {
-                            if (memcmp(&grom[c * 8], &bit[0], 8) == 0)
-                                break;
-                        }
+                        c = search_bitmap(&bit[0], grom, 64);
                     }
                     if (c == 64) {
                         for (d = 0; d < 8; d++)
@@ -302,23 +385,40 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
             c = -1;
         }
         if (c == -1) {  /* Not in GROM? try to assign a GRAM card */
-            for (c = 0; c < number_bitmaps; c++) {
-                if (memcmp(&bitmaps[c * 8], &bit[0], 8) == 0)
-                    break;
+            c = search_bitmap(&bit[0], bitmaps, number_bitmaps);
+            if (c == number_bitmaps && reverse == 2) {
+                mirror_x(&bit[0]);
+                c = search_bitmap(&bit[0], bitmaps, number_bitmaps);
+                if (c != number_bitmaps)
+                    *yo |= 0x0400;  /* X-flip */
+                mirror_x(&bit[0]);
+            }
+            if (c == number_bitmaps && reverse == 2) {
+                mirror_y(&bit[0]);
+                c = search_bitmap(&bit[0], bitmaps, number_bitmaps);
+                if (c != number_bitmaps)
+                    *yo |= 0x0800;  /* Y-flip */
+                mirror_y(&bit[0]);
+            }
+            if (c == number_bitmaps && reverse == 2) {
+                mirror_x(&bit[0]);
+                mirror_y(&bit[0]);
+                c = search_bitmap(&bit[0], bitmaps, number_bitmaps);
+                if (c != number_bitmaps)
+                    *yo |= 0x0c00;  /* Y-flip */
+                mirror_x(&bit[0]);
+                mirror_y(&bit[0]);
             }
             if (c == number_bitmaps) {
                 
                 /* Try to search a complemented GRAM card */
-                if (reverse) {
+                if (reverse == 1) {
                     if ((stack_color && (color_background < 8 &&
                                          (color_foreground == stack[current_stack] || color_foreground == stack[(current_stack + 1) & 3]))) ||
                         (!stack_color && color_background < 8)) {
                         for (d = 0; d < 8; d++)
                             bit[d] = ~bit[d];
-                        for (c = 0; c < number_bitmaps; c++) {
-                            if (memcmp(&bitmaps[c * 8], &bit[0], 8) == 0)
-                                break;
-                        }
+                        c = search_bitmap(&bit[0], bitmaps, number_bitmaps);
                         if (c < number_bitmaps) {
                             d = color_foreground;
                             color_foreground = color_background;
@@ -410,6 +510,7 @@ int main(int argc, char *argv[])
     int use_print = 0;
     int magic_mobs = 0;
     int base_offset = 0;
+    int use_constants = 1;
     int stub = 1;
     char *label = "screen";
     
@@ -437,6 +538,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "    -p    Uses PRINT in IntyBASIC mode\n");
         fprintf(stderr, "    -o20  Starts offset for cards in 20 (0-63 is valid)\n");
         fprintf(stderr, "    -m    Tries to use MOBs for more than 2 colors per card\n");
+        fprintf(stderr, "    -c    Doesn't use constants.bas for -m option\n");
         fprintf(stderr, "    -i    Generates BITMAP statements instead of DATA\n\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -473,6 +575,8 @@ int main(int argc, char *argv[])
             base_offset = atoi(argv[arg] + 2);
         if (c == 'b')  /* -b IntyBASIC mode */
             intybasic = 1;
+        if (c == 'c')  /* -c Doesn't use constants */
+            use_constants = 0;
         if (c == 's') {  /* -s0000 Use Color Stack mode */
             stack_color = 1;
             if (strlen(argv[arg]) != 6) {
@@ -501,6 +605,9 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Warning: argument -n is ignored when in assembler mode\n");
         if (magic_mobs)
             fprintf(stderr, "Warning: argument -m is ignored when in assembler mode\n");
+    } else {
+        if (!use_constants && !magic_mobs)
+            fprintf(stderr, "Warning: argument -c is ignored if not using -m\n");
     }
     if (arg >= argc) {
         fprintf(stderr, "Missing input file name\n");
@@ -708,7 +815,7 @@ int main(int argc, char *argv[])
                         }
                     }
                     memcpy(bit, best_bit, 8);
-                    c = optimize_from_grom(x, y, best_color, 0, 0);
+                    c = optimize_from_grom(x, y, best_color, 0, 2, &best_yo);
                     if (c >= 256)
                         c += base_offset;
                     mobs[mob_pointer++] = (x + 8 + best_xo) | 0x0200 | ((best_size & 0xf0) == 0x20 ? 0x0400 : 0);
@@ -794,7 +901,7 @@ int main(int argc, char *argv[])
                         bit[c] |= 0x80 >> d;
                 }
             }
-            c = optimize_from_grom(x, y, color_foreground, color_background, 1);
+            c = optimize_from_grom(x, y, color_foreground, color_background, 1, NULL);
             if (color_foreground == -1)
                 color_foreground = 0;
             if (c >= 256)
@@ -852,6 +959,8 @@ int main(int argc, char *argv[])
         fprintf(a, "\tREM Created: %s\n", asctime(date));
         if (stub) {
             fprintf(a, "\tREM stub for showing image\n");
+            if (use_constants)
+                fprintf(a, "\tINCLUDE \"constants.bas\"\n");
             if (stack_color)
                 fprintf(a, "\tMODE 0,%d,%d,%d,%d\n", stack[0], stack[1], stack[2], stack[3]);
             else
@@ -865,7 +974,52 @@ int main(int argc, char *argv[])
             }
             if (magic_mobs) {
                 for (c = 0; c < mob_pointer; c += 3) {
-                    fprintf(a, "\tSPRITE %d,$%04x,$%04x,$%04x\n", c / 3, mobs[c], mobs[c + 1], mobs[c + 2]);
+                    if (use_constants) {
+                        fprintf(a, "\tSPRITE %d,", c/ 3);
+                        if (mobs[c] & 0x0200)
+                            fprintf(a, "VISIBLE+");
+                        if (mobs[c] & 0x0400)
+                            fprintf(a, "ZOOMX2+");
+                        fprintf(a, "%d,", mobs[c] & 0x00ff);
+                        if ((mobs[c + 1] & 0x0300) == 0x0100) {
+                            fprintf(a, "ZOOMY2+");
+                        } else if ((mobs[c + 1] & 0x0300) == 0x0200) {
+                            fprintf(a, "ZOOMY4+");
+                        } else if ((mobs[c + 1] & 0x0300) == 0x0300) {
+                            fprintf(a, "ZOOMY8+");
+                        } else if ((mobs[c + 1] & 0x0c00) == 0x0400) {
+                            fprintf(a, "FLIPX+");
+                        } else if ((mobs[c + 1] & 0x0c00) == 0x0800) {
+                            fprintf(a, "FLIPY+");
+                        } else if ((mobs[c + 1] & 0x0c00) == 0x0c00) {
+                            fprintf(a, "MIRROR+");
+                        }
+                        fprintf(a, "%d,", mobs[c + 1] & 0x007f);
+                        switch (mobs[c + 2] & 0x1007) {
+                            case 0x0000:    fprintf(a, "SPR_BLACK+");       break;
+                            case 0x0001:    fprintf(a, "SPR_BLUE+");        break;
+                            case 0x0002:    fprintf(a, "SPR_RED+");         break;
+                            case 0x0003:    fprintf(a, "SPR_TAN+");         break;
+                            case 0x0004:    fprintf(a, "SPR_DARKGREEN+");   break;
+                            case 0x0005:    fprintf(a, "SPR_GREEN+");       break;
+                            case 0x0006:    fprintf(a, "SPR_YELLOW+");      break;
+                            case 0x0007:    fprintf(a, "SPR_WHITE+");       break;
+                            case 0x1000:    fprintf(a, "SPR_GREY+");        break;
+                            case 0x1001:    fprintf(a, "SPR_CYAN+");        break;
+                            case 0x1002:    fprintf(a, "SPR_ORANGE+");      break;
+                            case 0x1003:    fprintf(a, "SPR_BROWN+");       break;
+                            case 0x1004:    fprintf(a, "SPR_PINK+");        break;
+                            case 0x1005:    fprintf(a, "SPR_LIGHTBLUE+");   break;
+                            case 0x1006:    fprintf(a, "SPR_YELLOWGREEN+"); break;
+                            case 0x1007:    fprintf(a, "SPR_PURPLE+");      break;
+                        }
+                        if (mobs[c + 2] & 0x0800)
+                            fprintf(a, "SPR%02d\n", (mobs[c + 2] & 0x07f8) / 8);
+                        else
+                            fprintf(a, "$%04x\n", mobs[c + 2] & 0x07f8);
+                    } else {
+                        fprintf(a, "\tSPRITE %d,$%04x,$%04x,$%04x\n", c / 3, mobs[c], mobs[c + 1], mobs[c + 2]);
+                    }
                 }
             }
             fprintf(a, "\tWAIT\n");
