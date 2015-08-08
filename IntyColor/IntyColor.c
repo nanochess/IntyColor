@@ -54,6 +54,9 @@
 //  Revision: Aug/07/2015. Allows to use MOB with assembler output. The -r
 //                         option chooses file. Shows in report where MOB are
 //                         used.
+//  Revisión: Aug/08/2015. New option -g allowing to enter a file with exact
+//                         clues of where are MOB positioned. Now MOB are
+//                         drawn in report.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,9 +64,11 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v0.9 Aug/07/2015"     /* Software version */
+#define VERSION "v0.9 Aug/08/2015"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
+
+/*#define DEBUG*/
 
 unsigned char *bitmap;          /* Origin bitmap converted to indexed colors 0-15 */
 int size_x;                     /* Size X in pixels */
@@ -76,7 +81,7 @@ unsigned char grom[256 * 8];    /* Contents of GROM file */
 unsigned char bitmaps[64 * 8];  /* Bitmaps created */
 int number_bitmaps;             /* Number of bitmaps used */
 
-unsigned char bit[8];
+unsigned char bit[16];
 
 unsigned short *screen;         /* Screen cards */
 int size_x_cards;               /* Screen X size in cards */
@@ -93,6 +98,9 @@ int mob_pointer;                /* Pointer to next MOB available */
 
 int err_code;                   /* Final error code */
 int total_errors;
+
+int clue[8][6];
+int total_clues;
 
 /*
  ** The 16 colors available in Intellivision
@@ -158,84 +166,94 @@ char *binary(int data)
 /*
  ** Check for valid bitmap in color and size for representation as a MOB
  */
-int check_for_valid(int color, int x, int y, int x_size, int y_size, int *xo, int *yo)
+int check_for_valid(int color, int x, int y, int x_size, int y_size, int two_high, int *xo, int *yo)
 {
     int x1;
     int y1;
     int x2;
     int y2;
-    signed char *current_used;
     int c;
     
     if (x + 8 * x_size > size_x || y + 8 * y_size > size_y)
         return 0;
     
     /* Get the offset for the MOB (trying to optimize) */
-    *xo = -1;
-    *yo = -1;
-    for (y1 = y; y1 < y + 8; y1++) {
-        for (x1 = x; x1 < x + 8; x1++) {
-            if (bitmap[y1 * size_x + x1] == color)
+    if (*yo == -1) {
+        for (y1 = y; y1 < y + (two_high ? 16 : 8); y1++) {
+            for (x1 = x; x1 < x + 8; x1++) {
+                if (bitmap[y1 * size_x + x1] == color)
+                    break;
+            }
+            if (x1 < x + 8) {
+                *yo = y1 - y;
                 break;
-        }
-        if (x1 < x + 8) {
-            *yo = y1 - y;
-            break;
+            }
         }
     }
     if (*yo == -1)  /* Impossible case */
         return 0;
-    for (x1 = x; x1 < x + 8; x1++) {
-        for (y1 = y + *yo; y1 < y + *yo + 8; y1++) {
-            if (bitmap[y1 * size_x + x1] == color)
+    if (*xo == -1) {
+        for (x1 = x; x1 < x + 8; x1++) {
+            for (y1 = y + *yo; y1 < y + *yo + (two_high ? 16 : 8); y1++) {
+                if (bitmap[y1 * size_x + x1] == color)
+                    break;
+            }
+            if (y1 < y + *yo + 8) {
+                *xo = x1 - x;
                 break;
-        }
-        if (y1 < y + *yo + 8) {
-            *xo = x1 - x;
-            break;
+            }
         }
     }
-    if (*xo == -1)  /* Impossible case */
+    if (*xo == -1) {  /* Impossible case */
+        *yo = -1;
         return 0;
+    }
     x += *xo;
     y += *yo;
-    if (x + 8 * x_size > size_x) {
-        x -= *xo;
-        *xo = 0;
-    }
-    if (y + 8 * y_size > size_y) {
-        y -= *yo;
-        *yo = 0;
-    }
     
     /* Initialize the bitmap */
     memset(bit, 0, sizeof(bit));
-    for (y1 = y; y1 < y + 8 * y_size; y1 += y_size) {
+    for (y1 = y; y1 < y + (two_high ? 16 : 8) * y_size; y1 += y_size) {
         for (x1 = x; x1 < x + 8 * x_size; x1 += x_size) {
-            current_used = &used_color[((y1 / 8 * size_x_cards) + (x1 / 8)) * 16];
-            c = 0;
-            for (c = 0; c < 16 && current_used[c] != -1; c++) {
-                if (current_used[c] == color)
-                    break;
-            }
-            if (c >= 16 || current_used[c] == -1)  /* Does use it the color? */
-                return 0;  /* No */
             
             /* Check that a whole pixel can be represented with the color */
             c = 0;
             for (y2 = 0; y2 < y_size; y2++) {
+                if (y1 + y2 >= size_y)
+                    continue;
                 for (x2 = 0; x2 < x_size; x2++) {
+                    if (x1 + x2 >= size_x)
+                        continue;
                     if (bitmap[(y1 + y2) * size_x + x1 + x2] == color)
                         c++;
                 }
             }
-            if (c > 0 && c < x_size * y_size)
+            if (c > 0 && c < x_size * y_size) {
+#ifdef DEBUG
+                fprintf(stderr, "MOB not applied because incomplete pixel\n");
+#endif
                 return 0;
+            }
             if (c == x_size * y_size)
                 bit[(y1 - y) / y_size] |= 0x80 >> ((x1 - x) / x_size);
         }
     }
-    /*    fprintf(stderr, "Valid color %d,x=%d,y=%d,x_size=%d,y_size=%d (xo=%d,yo=%d)\n", color, x, y, x_size, y_size, *xo, *yo);*/
+    if (two_high) {
+        if (memcmp(bit, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 16) == 0) {
+#ifdef DEBUG
+            fprintf(stderr, "MOB not applied because would not be used\n");
+#endif
+            return 0;
+        }
+    } else if (memcmp(bit, "\0\0\0\0\0\0\0\0", 8) == 0) {
+#ifdef DEBUG
+        fprintf(stderr, "MOB not applied because would not be used\n");
+#endif
+        return 0;
+    }
+#ifdef DEBUG
+    fprintf(stderr, "Valid color %d,x=%d,y=%d,x_size=%d,y_size=%d (xo=%d,yo=%d)\n", color, x, y, x_size, y_size, *xo, *yo);
+#endif
     return 1;
 }
 
@@ -298,6 +316,22 @@ void mark_usage(int x, int y, int flags)
             bitmap[(y + d) * size_x + x + c] |= flags;
         }
     }
+}
+
+/*
+ ** Only load a 8x16 bitmap
+ */
+int optimize_two_high(int x, int y, int color_foreground, int color_background, int reverse, int *yo)
+{
+    int c;
+    
+    c = number_bitmaps;
+    memcpy(&bitmaps[number_bitmaps * 8], &bit[0], 8);
+    number_bitmaps++;
+    memcpy(&bitmaps[number_bitmaps * 8], &bit[8], 8);
+    number_bitmaps++;
+    c += 256;
+    return c;
 }
 
 /*
@@ -364,14 +398,14 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                 if (c == 64 && reverse == 2) {
                     mirror_x(&bit[0]);
                     c = search_bitmap(&bit[0], grom, 64);
-                    if (c != 256)
+                    if (c != 64)
                         *yo |= 0x0400;  /* X-flip */
                     mirror_x(&bit[0]);
                 }
                 if (c == 64 && reverse == 2) {
                     mirror_y(&bit[0]);
                     c = search_bitmap(&bit[0], grom, 64);
-                    if (c != 256)
+                    if (c != 64)
                         *yo |= 0x0800;  /* Y-flip */
                     mirror_y(&bit[0]);
                 }
@@ -379,7 +413,7 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                     mirror_x(&bit[0]);
                     mirror_y(&bit[0]);
                     c = search_bitmap(&bit[0], grom, 64);
-                    if (c != 256)
+                    if (c != 64)
                         *yo |= 0x0c00;  /* Y-flip */
                     mirror_x(&bit[0]);
                     mirror_y(&bit[0]);
@@ -536,6 +570,7 @@ int main(int argc, char *argv[])
     int base_offset = 0;
     int use_constants = 1;
     int stub = 1;
+    int clues = 0;
     char *generate_report = NULL;
     char *label = "screen";
     char *input_file;
@@ -567,6 +602,13 @@ int main(int argc, char *argv[])
         fprintf(stderr, "    -c    Doesn't use constants.bas for -m option\n");
         fprintf(stderr, "    -i    Generates BITMAP statements instead of DATA\n");
         fprintf(stderr, "    -r output.bmp  Generate BMP report of conversion in file\n");
+        fprintf(stderr, "                   red = error, green = GRAM, yellow = GROM\n");
+        fprintf(stderr, "                   grey = MOB\n");
+        fprintf(stderr, "    -g clue.txt    Exact clues for -m, text file up to 8 lines:\n");
+        fprintf(stderr, "                   x,y,color[,x_zoom(1-2),y_zoom(1-4),0/1]\n");
+        fprintf(stderr, "                   The final 0/1 indicates 8x8 or 8x16\n");
+        fprintf(stderr, "                   Suggestion: run with empty text file and\n");
+        fprintf(stderr, "                   option -r to see what cards require MOBs\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -629,6 +671,59 @@ int main(int argc, char *argv[])
             else
                 fprintf(stderr, "Error: missing filename for option -r\n");
         }
+        if (c == 'g') {     /* -g Clue file */
+            arg++;
+            if (arg < argc) {
+                a = fopen(argv[arg], "r");
+                if (a != NULL) {
+                    char line[256];
+                    int c;
+                    int x;
+                    int y;
+                    int color;
+                    int x_size;
+                    int y_size;
+                    int two_high;
+                    
+                    clues = 1;
+                    while (fgets(line, sizeof(line) - 1, a)) {
+                        c = sscanf(line, "%d,%d,%d,%d,%d,%d", &x, &y, &color, &x_size, &y_size, &two_high);
+                        if (c == 0)
+                            continue;
+                        if (total_clues == 8) {
+                            fprintf(stderr, "Error: clues for more than 8 MOBs\n");
+                            break;
+                        }
+                        if (c < 6)
+                            two_high = 0;
+                        if (c < 5)
+                            y_size = 0;
+                        if (c < 4)
+                            x_size = 0;
+                        if (c < 3)
+                            color = 0;
+                        if (c < 2)
+                            y = 0;
+                        if (c < 1)
+                            x = 0;
+                        if (c < 3)
+                            fprintf(stderr, "Error: less than 3 numbers in line of clue file\n");
+                        clue[total_clues][0] = x;
+                        clue[total_clues][1] = y;
+                        clue[total_clues][2] = color;
+                        clue[total_clues][3] = x_size;
+                        clue[total_clues][4] = y_size;
+                        clue[total_clues][5] = two_high;
+                        total_clues++;
+                    }
+                    fclose(a);
+                } else {
+                    fprintf(stderr, "Error: unable to open clue file %s\n", argv[arg]);
+                }
+            } else {
+                fprintf(stderr, "Error: missing filename for option -g\n");
+            }
+        }
         arg++;
     }
     if (!intybasic) {
@@ -650,6 +745,7 @@ int main(int argc, char *argv[])
     }
     
     /* Open input file */
+    fprintf(stdout, "Processing: %s\n", argv[arg]);
     a = fopen(input_file = argv[arg], "rb");
     arg++;
     if (a == NULL) {
@@ -761,12 +857,11 @@ int main(int argc, char *argv[])
     
     /* Generate automagically the MOBs */
     if (magic_mobs) {
-        int out_of_mobs = 0;
-        
-        do {
-            mobs_found = 0;
-            for (y = 0; y < size_y; y += 8) {
-                for (x = 0; x < size_x; x += 8) {  /* For each 8x8 block */
+        if (clues) {
+            int step;
+            
+            for (step = 0; step < 2; step++) {
+                for (n = 0; n < total_clues; n++) {
                     int best_size;
                     int best_color;
                     int best_xo;
@@ -775,102 +870,220 @@ int main(int argc, char *argv[])
                     int xo;
                     int yo;
                     
-                    current_used = &used_color[((y / 8 * size_x_cards) + (x / 8)) * 16];
-                    if (current_used[2] == -1)  /* More than 2 colors? */
-                        continue;               /* No, continue */
-                    if (mob_pointer == 24) {    /* All MOBs used? */
-                        if (!out_of_mobs) {
-                            out_of_mobs = 1;
-                            fprintf(stdout, "Not enough MOBs for further cards with more than 2 colors\n");
-                        }
-                        continue;               /* Yes, continue */
-                    }
-                    
-                    /* Create the biggest possible MOB from it */
+                    if (step == 0 && clue[n][5] == 0)  /* First step, only 8x16 */
+                        continue;
+                    if (step == 1 && clue[n][5] == 1)  /* Second step, only 8x8 */
+                        continue;
+                    fprintf(stdout, "Clue %d at x=%d,y=%d: ", n + 1, clue[n][0], clue[n][1]);
+                    x = clue[n][0] & 0xf8;
+                    xo = clue[n][0] & 0x07;
+                    y = clue[n][1] & 0xf8;
+                    yo = clue[n][1] & 0x07;
                     best_size = 0;
                     best_color = 0;
                     best_xo = 0;
                     best_yo = 0;
                     memset(best_bit, 0, sizeof(best_bit));
-                    for (n = 15; n >= 0; n--) {
-                        if (current_used[n] == -1)
-                            continue;
-                        if (stack_color) {
-                            if (best_size > 0 && best_color != stack[0] && best_color != stack[1] && best_color != stack[2] && best_color != stack[3] && (current_used[n] == stack[0] || current_used[n] == stack[1] || current_used[n] == stack[2] || current_used[n] == stack[3]))
-                                continue;
+                    if (clue[n][3] != 0 && clue[n][4] != 0 && check_for_valid(clue[n][2], x, y, clue[n][3], clue[n][4], clue[n][5], &xo, &yo)) {
+                        if (clue[n][3] * clue[n][4] > best_size || xo > best_xo || yo > best_yo) {
+                            best_size = 0x500 | (clue[n][3] << 4) | clue[n][4];
+                            best_color = clue[n][2];
+                            best_xo = xo;
+                            best_yo = yo;
+                            memcpy(best_bit, bit, sizeof(best_bit));
                         }
-                        if (check_for_valid(current_used[n], x, y, 2, 4, &xo, &yo)) {
-                            if (2 * 4 > best_size || xo > best_xo || yo > best_yo) {
-                                best_size = 0x524;
-                                best_color = current_used[n];
-                                best_xo = xo;
-                                best_yo = yo;
-                                memcpy(best_bit, bit, sizeof(best_bit));
-                            }
-                        } else if (check_for_valid(current_used[n], x, y, 2, 2, &xo, &yo)) {
-                            if (2 * 2 > best_size || xo > best_xo || yo > best_yo) {
-                                best_size = 0x422;
-                                best_color = current_used[n];
-                                best_xo = xo;
-                                best_yo = yo;
-                                memcpy(best_bit, bit, sizeof(best_bit));
-                            }
-                        } else if (check_for_valid(current_used[n], x, y, 1, 4, &xo, &yo)) {
-                            if (1 * 4 > best_size || xo > best_xo || yo > best_yo) {
-                                best_size = 0x314;
-                                best_color = current_used[n];
-                                best_xo = xo;
-                                best_yo = yo;
-                                memcpy(best_bit, bit, sizeof(best_bit));
-                            }
-                        } else if (check_for_valid(current_used[n], x, y, 2, 1, &xo, &yo)) {
-                            if (2 * 1 > best_size || xo > best_xo || yo > best_yo) {
-                                best_size = 0x221;
-                                best_color = current_used[n];
-                                best_xo = xo;
-                                best_yo = yo;
-                                memcpy(best_bit, bit, sizeof(best_bit));
-                            }
-                        } else if (check_for_valid(current_used[n], x, y, 1, 2, &xo, &yo)) {
-                            if (1 * 2 > best_size || xo > best_xo || yo > best_yo) {
-                                best_size = 0x112;
-                                best_color = current_used[n];
-                                best_xo = xo;
-                                best_yo = yo;
-                                memcpy(best_bit, bit, sizeof(best_bit));
-                            }
-                        } else if (check_for_valid(current_used[n], x, y, 1, 1, &xo, &yo)) {
-                            if (1 * 1 > best_size || xo > best_xo || yo > best_yo) {
-                                best_size = 0x011;
-                                best_color = current_used[n];
-                                best_xo = xo;
-                                best_yo = yo;
-                                memcpy(best_bit, bit, sizeof(best_bit));
-                            }
+                    } else if (check_for_valid(clue[n][2], x, y, 2, 4, clue[n][5], &xo, &yo)) {
+                        if (2 * 4 > best_size || xo > best_xo || yo > best_yo) {
+                            best_size = 0x524;
+                            best_color = clue[n][2];
+                            best_xo = xo;
+                            best_yo = yo;
+                            memcpy(best_bit, bit, sizeof(best_bit));
+                        }
+                    } else if (check_for_valid(clue[n][2], x, y, 2, 2, clue[n][5], &xo, &yo)) {
+                        if (2 * 2 > best_size || xo > best_xo || yo > best_yo) {
+                            best_size = 0x422;
+                            best_color = clue[n][2];
+                            best_xo = xo;
+                            best_yo = yo;
+                            memcpy(best_bit, bit, sizeof(best_bit));
+                        }
+                    } else if (check_for_valid(clue[n][2], x, y, 1, 4, clue[n][5], &xo, &yo)) {
+                        if (1 * 4 > best_size || xo > best_xo || yo > best_yo) {
+                            best_size = 0x314;
+                            best_color = clue[n][2];
+                            best_xo = xo;
+                            best_yo = yo;
+                            memcpy(best_bit, bit, sizeof(best_bit));
+                        }
+                    } else if (check_for_valid(clue[n][2], x, y, 2, 1, clue[n][5], &xo, &yo)) {
+                        if (2 * 1 > best_size || xo > best_xo || yo > best_yo) {
+                            best_size = 0x221;
+                            best_color = clue[n][2];
+                            best_xo = xo;
+                            best_yo = yo;
+                            memcpy(best_bit, bit, sizeof(best_bit));
+                        }
+                    } else if (check_for_valid(clue[n][2], x, y, 1, 2, clue[n][5], &xo, &yo)) {
+                        if (1 * 2 > best_size || xo > best_xo || yo > best_yo) {
+                            best_size = 0x112;
+                            best_color = clue[n][2];
+                            best_xo = xo;
+                            best_yo = yo;
+                            memcpy(best_bit, bit, sizeof(best_bit));
+                        }
+                    } else if (check_for_valid(clue[n][2], x, y, 1, 1, clue[n][5], &xo, &yo)) {
+                        if (1 * 1 > best_size || xo > best_xo || yo > best_yo) {
+                            best_size = 0x011;
+                            best_color = clue[n][2];
+                            best_xo = xo;
+                            best_yo = yo;
+                            memcpy(best_bit, bit, sizeof(best_bit));
                         }
                     }
-                    for (d = best_yo; d < (best_size & 15) * 8 + best_yo; d++) {
+                    if (!best_size) {
+                        fprintf(stdout, "not applied\n");
+                        continue;
+                    }
+                    fprintf(stdout, "applied at %dx%d (8x%d)\n", (best_size & 0xf0) >> 4, best_size & 0x0f,
+                            clue[n][5] ? 16 : 8);
+                    for (d = best_yo; d < (best_size & 15) * (clue[n][5] ? 16 : 8) + best_yo; d++) {
                         for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c++) {
                             if (bitmap[(y + d) * size_x + (x + c)] == best_color)
                                 bitmap[(y + d) * size_x + (x + c)] = -1;
                         }
                     }
-                    for (d = best_yo; d < (best_size & 15) * 8 + best_yo; d += 7) {
+                    for (d = best_yo; d < (best_size & 15) * (clue[n][5] ? 16 : 8) + best_yo; d += 7) {
                         for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c += 7) {
                             lookup_used_colors((x + c) & -8, (y + d) & -8);
                         }
                     }
                     memcpy(bit, best_bit, 8);
-                    c = optimize_from_grom(x, y, best_color, 0, 2, &best_yo);
+                    if (clue[n][5] != 0)
+                        c = optimize_two_high(x, y, best_color, 0, 2, &best_yo);
+                    else
+                        c = optimize_from_grom(x, y, best_color, 0, 2, &best_yo);
                     if (c >= 256)
                         c += base_offset;
                     mobs[mob_pointer++] = (x + 8 + best_xo) | 0x0200 | ((best_size & 0xf0) == 0x20 ? 0x0400 : 0);
-                    mobs[mob_pointer++] = (y + 8 + best_yo) | ((best_size & 0x0f) != 0x04 ? (best_size & 0x0f) != 0x02 ? 0x0100 : 0x0200 : 0x0300);
+                    mobs[mob_pointer++] = (y + 8 + best_yo) | (clue[n][5] ? 0x0080 : 0) | ((best_size & 0x0f) != 0x04 ? (best_size & 0x0f) != 0x02 ? 0x0100 : 0x0200 : 0x0300);
                     mobs[mob_pointer++] = (c << 3) | (best_color & 7) | ((best_color & 8) << 9);
-                    mobs_found = 1;
                 }
             }
-        } while (mobs_found) ;
+        } else {
+            int out_of_mobs = 0;
+            
+            do {
+                mobs_found = 0;
+                for (y = 0; y < size_y; y += 8) {
+                    for (x = 0; x < size_x; x += 8) {  /* For each 8x8 block */
+                        int best_size;
+                        int best_color;
+                        int best_xo;
+                        int best_yo;
+                        char best_bit[8];
+                        int xo;
+                        int yo;
+                        
+                        current_used = &used_color[((y / 8 * size_x_cards) + (x / 8)) * 16];
+                        if (current_used[2] == -1)  /* More than 2 colors? */
+                            continue;               /* No, continue */
+                        if (mob_pointer == 24) {    /* All MOBs used? */
+                            if (!out_of_mobs) {
+                                out_of_mobs = 1;
+                                fprintf(stdout, "Not enough MOBs for further cards with more than 2 colors\n");
+                            }
+                            continue;               /* Yes, continue */
+                        }
+                        
+                        /* Create the biggest possible MOB from it */
+                        best_size = 0;
+                        best_color = 0;
+                        best_xo = 0;
+                        best_yo = 0;
+                        memset(best_bit, 0, sizeof(best_bit));
+                        for (n = 15; n >= 0; n--) {
+                            if (current_used[n] == -1)
+                                continue;
+                            if (stack_color) {
+                                if (best_size > 0 && best_color != stack[0] && best_color != stack[1] && best_color != stack[2] && best_color != stack[3] && (current_used[n] == stack[0] || current_used[n] == stack[1] || current_used[n] == stack[2] || current_used[n] == stack[3]))
+                                    continue;
+                            }
+                            xo = -1;
+                            yo = -1;
+                            if (check_for_valid(current_used[n], x, y, 2, 4, 0, &xo, &yo)) {
+                                if (2 * 4 > best_size || xo > best_xo || yo > best_yo) {
+                                    best_size = 0x524;
+                                    best_color = current_used[n];
+                                    best_xo = xo;
+                                    best_yo = yo;
+                                    memcpy(best_bit, bit, sizeof(best_bit));
+                                }
+                            } else if (check_for_valid(current_used[n], x, y, 2, 2, 0, &xo, &yo)) {
+                                if (2 * 2 > best_size || xo > best_xo || yo > best_yo) {
+                                    best_size = 0x422;
+                                    best_color = current_used[n];
+                                    best_xo = xo;
+                                    best_yo = yo;
+                                    memcpy(best_bit, bit, sizeof(best_bit));
+                                }
+                            } else if (check_for_valid(current_used[n], x, y, 1, 4, 0, &xo, &yo)) {
+                                if (1 * 4 > best_size || xo > best_xo || yo > best_yo) {
+                                    best_size = 0x314;
+                                    best_color = current_used[n];
+                                    best_xo = xo;
+                                    best_yo = yo;
+                                    memcpy(best_bit, bit, sizeof(best_bit));
+                                }
+                            } else if (check_for_valid(current_used[n], x, y, 2, 1, 0, &xo, &yo)) {
+                                if (2 * 1 > best_size || xo > best_xo || yo > best_yo) {
+                                    best_size = 0x221;
+                                    best_color = current_used[n];
+                                    best_xo = xo;
+                                    best_yo = yo;
+                                    memcpy(best_bit, bit, sizeof(best_bit));
+                                }
+                            } else if (check_for_valid(current_used[n], x, y, 1, 2, 0, &xo, &yo)) {
+                                if (1 * 2 > best_size || xo > best_xo || yo > best_yo) {
+                                    best_size = 0x112;
+                                    best_color = current_used[n];
+                                    best_xo = xo;
+                                    best_yo = yo;
+                                    memcpy(best_bit, bit, sizeof(best_bit));
+                                }
+                            } else if (check_for_valid(current_used[n], x, y, 1, 1, 0, &xo, &yo)) {
+                                if (1 * 1 > best_size || xo > best_xo || yo > best_yo) {
+                                    best_size = 0x011;
+                                    best_color = current_used[n];
+                                    best_xo = xo;
+                                    best_yo = yo;
+                                    memcpy(best_bit, bit, sizeof(best_bit));
+                                }
+                            }
+                        }
+                        for (d = best_yo; d < (best_size & 15) * 8 + best_yo; d++) {
+                            for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c++) {
+                                if (bitmap[(y + d) * size_x + (x + c)] == best_color)
+                                    bitmap[(y + d) * size_x + (x + c)] = -1;
+                            }
+                        }
+                        for (d = best_yo; d < (best_size & 15) * 8 + best_yo; d += 7) {
+                            for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c += 7) {
+                                lookup_used_colors((x + c) & -8, (y + d) & -8);
+                            }
+                        }
+                        memcpy(bit, best_bit, 8);
+                        c = optimize_from_grom(x, y, best_color, 0, 2, &best_yo);
+                        if (c >= 256)
+                            c += base_offset;
+                        mobs[mob_pointer++] = (x + 8 + best_xo) | 0x0200 | ((best_size & 0xf0) == 0x20 ? 0x0400 : 0);
+                        mobs[mob_pointer++] = (y + 8 + best_yo) | ((best_size & 0x0f) != 0x04 ? (best_size & 0x0f) != 0x02 ? 0x0100 : 0x0200 : 0x0300);
+                        mobs[mob_pointer++] = (c << 3) | (best_color & 7) | ((best_color & 8) << 9);
+                        mobs_found = 1;
+                    }
+                }
+            } while (mobs_found) ;
+        }
     }
     
     /* Generate the bitmap */
@@ -1026,11 +1239,41 @@ int main(int argc, char *argv[])
             
             /* Annotate where are used MOBs */
             for (c = 0; c < mob_pointer; c += 3) {
+                int sx;
+                int sy;
+                int x1;
+                int y1;
+                int x2;
+                int y2;
+                int d;
+                
                 x = (mobs[c] & 0xff) - 8;
                 y = (mobs[c + 1] & 0x7f) - 8;
-                for (n = y; n < y + (4 << ((mobs[c] & 0x0300) >> 8)); n++) {
-                    for (d = x; d < x + (mobs[c] & 0x0400 ? 16 : 8); d++) {
-                        bitmap[n * size_x + d] |= 0x40;
+                if ((mobs[c] & 0x0400) != 0)
+                    sx = 2;
+                else
+                    sx = 1;
+                if ((mobs[c + 1] & 0x0300) == 0x0100)
+                    sy = 1;
+                else if ((mobs[c + 1] & 0x0300) == 0x0200)
+                    sy = 2;
+                else if ((mobs[c + 1] & 0x0300) == 0x0400)
+                    sy = 4;
+                else
+                    sy = 0; /* Shouldn't happen */
+                for (y1 = 0; y1 < (mobs[c + 1] & 0x80 ? 16 : 8); y1++) {
+                    for (x1 = 0; x1 < 8; x1++) {
+                        if (mobs[c + 2] & 0x0800)
+                            d = bitmaps[(mobs[c + 2] & 0x07f8) + y1];
+                        else
+                            d = grom[(mobs[c + 2] & 0x07f8) + y1];
+                        if ((d & (0x80 >> x1)) == 0)
+                            continue;
+                        for (y2 = 0; y2 < sy; y2++) {
+                            for (x2 = 0; x2 < sx; x2++) {
+                                bitmap[(y + y1 * sy + y2) * size_x + (x + x1 * sx + x2)] = 0x40 | (mobs[c + 2] & 7) | ((mobs[c + 2] & 0x1000) >> 9);
+                            }
+                        }
                     }
                 }
             }
@@ -1040,21 +1283,24 @@ int main(int argc, char *argv[])
                     header[0x01] = colors[(bitmap[y * size_x + x] & 0x0f) * 3 + 1];
                     header[0x02] = colors[(bitmap[y * size_x + x] & 0x0f) * 3 + 2];
                     c = (header[0x00] * 30 + header[0x01] * 59 + header[0x02] * 11) / 100;
+                    header[0x00] = 0;
+                    header[0x01] = 0;
+                    header[0x02] = 0;
                     if (bitmap[y * size_x + x] & 0x10) {  /* Error in red */
-                        header[0x00] = 0;
-                        header[0x01] = 0;
                         header[0x02] = c;
-                    } else if (bitmap[y * size_x + x] & 0x20) {  /* GROM in yellow */
-                        header[0x00] = 0;
+                    }
+                    if (bitmap[y * size_x + x] & 0x20) {  /* GROM in cyan */
+                        header[0x00] = c;
                         header[0x01] = c;
-                        header[0x02] = c;
-                    } else {  /* GRAM in green */
+                        header[0x02] = 0;
+                    }
+                    if ((bitmap[y * size_x + x] & 0x70) == 0) {  /* GRAM in green */
                         header[0x00] = 0;
                         header[0x01] = c;
                         header[0x02] = 0;
                     }
                     if (bitmap[y * size_x + x] & 0x40)  /* MOB in use */
-                        header[0x00] = header[0x01] | header[0x02];
+                        header[0x00] = header[0x01] = header[0x02] = c;
                     fwrite(header, 1, 3, a);
                 }
             }
@@ -1117,13 +1363,17 @@ int main(int argc, char *argv[])
                         if (mobs[c] & 0x0400)
                             fprintf(a, "ZOOMX2+");
                         fprintf(a, "%d,", mobs[c] & 0x00ff);
+                        if ((mobs[c + 1] & 0x0080) == 0x0080) {
+                            fprintf(a, "DOUBLEY+");
+                        }
                         if ((mobs[c + 1] & 0x0300) == 0x0100) {
                             fprintf(a, "ZOOMY2+");
                         } else if ((mobs[c + 1] & 0x0300) == 0x0200) {
                             fprintf(a, "ZOOMY4+");
                         } else if ((mobs[c + 1] & 0x0300) == 0x0300) {
                             fprintf(a, "ZOOMY8+");
-                        } else if ((mobs[c + 1] & 0x0c00) == 0x0400) {
+                        }
+                        if ((mobs[c + 1] & 0x0c00) == 0x0400) {
                             fprintf(a, "FLIPX+");
                         } else if ((mobs[c + 1] & 0x0c00) == 0x0800) {
                             fprintf(a, "FLIPY+");
