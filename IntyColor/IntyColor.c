@@ -51,6 +51,9 @@
 //  Revision: Aug/06/2015. Bunch of conversion errors now to stdout. New
 //                         option -r to generate a report BMP file to show
 //                         where are the problems.
+//  Revision: Aug/07/2015. Allows to use MOB with assembler output. The -r
+//                         option chooses file. Shows in report where MOB are
+//                         used.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,7 +61,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v0.9 Aug/06/2015"     /* Software version */
+#define VERSION "v0.9 Aug/07/2015"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
@@ -85,10 +88,11 @@ int stack_color;                /* Indicates stack color mode */
 int current_stack;              /* Current point to color stack */
 int stack[4];                   /* Stack of colors */
 
-int mobs[24];
-int mob_pointer;
+int mobs[24];                   /* MOB data pointer */
+int mob_pointer;                /* Pointer to next MOB available */
 
-int err_code;
+int err_code;                   /* Final error code */
+int total_errors;
 
 /*
  ** The 16 colors available in Intellivision
@@ -282,6 +286,21 @@ void mirror_y(unsigned char *bitmap)
 }
 
 /*
+ ** Mark usage of card
+ */
+void mark_usage(int x, int y, int flags)
+{
+    int c;
+    int d;
+    
+    for (d = 0; d < 8; d++) {
+        for (c = 0; c < 8; c++) {
+            bitmap[(y + d) * size_x + x + c] |= flags;
+        }
+    }
+}
+
+/*
  ** Try to optimize a bitmap using GROM
  */
 int optimize_from_grom(int x, int y, int color_foreground, int color_background, int reverse, int *yo)
@@ -437,6 +456,8 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                         fprintf(stderr, "More than 64 defined cards in block %d,%d\n",
                                 x, y);
                         err_code = 1;
+                        total_errors++;
+                        mark_usage(x, y, 0x10);
                         c = 0;
                     } else {
                         memcpy(&bitmaps[c * 8], &bit[0], 8);
@@ -494,21 +515,6 @@ void lookup_used_colors(int x, int y)
 }
 
 /*
- ** Mark usage of card
- */
-void mark_usage(int x, int y, int flags)
-{
-    int c;
-    int d;
-    
-    for (d = 0; d < 8; d++) {
-        for (c = 0; c < 8; c++) {
-            bitmap[(y + d) * size_x + x + c] |= flags;
-        }
-    }
-}
-
-/*
  ** Main program
  */
 int main(int argc, char *argv[])
@@ -530,8 +536,9 @@ int main(int argc, char *argv[])
     int base_offset = 0;
     int use_constants = 1;
     int stub = 1;
-    int generate_report = 0;
+    char *generate_report = NULL;
     char *label = "screen";
+    char *input_file;
     
     time_t actual;
     struct tm *date;
@@ -541,7 +548,6 @@ int main(int argc, char *argv[])
     int color_foreground;
     int color_background;
     int mobs_found;
-    int total_errors;
     
     actual = time(0);
     date = localtime(&actual);
@@ -560,7 +566,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "    -m    Tries to use MOBs for more than 2 colors per card\n");
         fprintf(stderr, "    -c    Doesn't use constants.bas for -m option\n");
         fprintf(stderr, "    -i    Generates BITMAP statements instead of DATA\n");
-        fprintf(stderr, "    -r    Generate BMP report of conversion intycolor_report.bmp\n\n");
+        fprintf(stderr, "    -r output.bmp  Generate BMP report of conversion in file\n");
+        fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
         fprintf(stderr, "colors and 16 background colors for each 8x8 block.\n\n");
@@ -601,7 +608,7 @@ int main(int argc, char *argv[])
         if (c == 's') {  /* -s0000 Use Color Stack mode */
             stack_color = 1;
             if (strlen(argv[arg]) != 6) {
-                fprintf(stderr, "Warning: Ignoring -s argument as size is invalid");
+                fprintf(stderr, "Warning: Ignoring -s argument as size is invalid\n");
             } else {
                 stack[0] = from_hex(argv[arg][2]);
                 stack[1] = from_hex(argv[arg][3]);
@@ -615,8 +622,13 @@ int main(int argc, char *argv[])
             use_bitmap = 1;
         if (c == 'n')  /* -n Remove stub from output */
             stub = 0;
-        if (c == 'r')  /* -r Generate report */
-            generate_report = 1;
+        if (c == 'r') {     /* -r Generate report */
+            arg++;
+            if (arg < argc)
+                generate_report = argv[arg];
+            else
+                fprintf(stderr, "Error: missing filename for option -r\n");
+        }
         arg++;
     }
     if (!intybasic) {
@@ -626,8 +638,8 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Warning: argument -i is ignored when in assembler mode\n");
         if (stub == 0)
             fprintf(stderr, "Warning: argument -n is ignored when in assembler mode\n");
-        if (magic_mobs)
-            fprintf(stderr, "Warning: argument -m is ignored when in assembler mode\n");
+        if (!use_constants)
+            fprintf(stderr, "Warning: argument -c is ignored when in assembler mode\n");
     } else {
         if (!use_constants && !magic_mobs)
             fprintf(stderr, "Warning: argument -c is ignored if not using -m\n");
@@ -638,7 +650,7 @@ int main(int argc, char *argv[])
     }
     
     /* Open input file */
-    a = fopen(argv[arg], "rb");
+    a = fopen(input_file = argv[arg], "rb");
     arg++;
     if (a == NULL) {
         fprintf(stderr, "Missing input file\n");
@@ -749,6 +761,8 @@ int main(int argc, char *argv[])
     
     /* Generate automagically the MOBs */
     if (magic_mobs) {
+        int out_of_mobs = 0;
+        
         do {
             mobs_found = 0;
             for (y = 0; y < size_y; y += 8) {
@@ -764,8 +778,13 @@ int main(int argc, char *argv[])
                     current_used = &used_color[((y / 8 * size_x_cards) + (x / 8)) * 16];
                     if (current_used[2] == -1)  /* More than 2 colors? */
                         continue;               /* No, continue */
-                    if (mob_pointer == 24)      /* All MOBs used? */
+                    if (mob_pointer == 24) {    /* All MOBs used? */
+                        if (!out_of_mobs) {
+                            out_of_mobs = 1;
+                            fprintf(stdout, "Not enough MOBs for further cards with more than 2 colors\n");
+                        }
                         continue;               /* Yes, continue */
+                    }
                     
                     /* Create the biggest possible MOB from it */
                     best_size = 0;
@@ -776,6 +795,10 @@ int main(int argc, char *argv[])
                     for (n = 15; n >= 0; n--) {
                         if (current_used[n] == -1)
                             continue;
+                        if (stack_color) {
+                            if (best_size > 0 && best_color != stack[0] && best_color != stack[1] && best_color != stack[2] && best_color != stack[3] && (current_used[n] == stack[0] || current_used[n] == stack[1] || current_used[n] == stack[2] || current_used[n] == stack[3]))
+                                continue;
+                        }
                         if (check_for_valid(current_used[n], x, y, 2, 4, &xo, &yo)) {
                             if (2 * 4 > best_size || xo > best_xo || yo > best_yo) {
                                 best_size = 0x524;
@@ -958,15 +981,15 @@ int main(int argc, char *argv[])
         }
     }
     if (total_errors > 1)
-        fprintf(stderr, "Found %d errors while converting image.\n", total_errors);
+        fprintf(stderr, "Found %d errors while converting image \"%s\".\n", total_errors, input_file);
     else if (total_errors == 1)
-        fprintf(stderr, "Found %d error while converting image.\n", total_errors);
+        fprintf(stderr, "Found %d error while converting image \"%s\".\n", total_errors, input_file);
     
     /* Generate report file */
     if (generate_report) {
-        a = fopen("intycolor_report.bmp", "wb");
+        a = fopen(generate_report, "wb");
         if (a == NULL) {
-            fprintf(stderr, "Unable to open report file intycolor_report.bmp\n");
+            fprintf(stderr, "Unable to write report file \"%s\"\n", generate_report);
             err_code = 2;
         } else {
             char header[54];
@@ -1000,6 +1023,17 @@ int main(int argc, char *argv[])
             header[0x2a] = c;       /* Y */
             header[0x2b] = c >> 8;
             fwrite(header, 1, sizeof(header), a);
+            
+            /* Annotate where are used MOBs */
+            for (c = 0; c < mob_pointer; c += 3) {
+                x = (mobs[c] & 0xff) - 8;
+                y = (mobs[c + 1] & 0x7f) - 8;
+                for (n = y; n < y + (4 << ((mobs[c] & 0x0300) >> 8)); n++) {
+                    for (d = x; d < x + (mobs[c] & 0x0400 ? 16 : 8); d++) {
+                        bitmap[n * size_x + d] |= 0x40;
+                    }
+                }
+            }
             for (y = size_y - 1; y >= 0; y--) {
                 for (x = 0; x < size_x; x++) {
                     header[0x00] = colors[(bitmap[y * size_x + x] & 0x0f) * 3];
@@ -1010,15 +1044,17 @@ int main(int argc, char *argv[])
                         header[0x00] = 0;
                         header[0x01] = 0;
                         header[0x02] = c;
-                    } else if (bitmap[y * size_x + x] & 0x20) {  /* GROM in cyan */
-                        header[0x00] = c;
+                    } else if (bitmap[y * size_x + x] & 0x20) {  /* GROM in yellow */
+                        header[0x00] = 0;
                         header[0x01] = c;
-                        header[0x02] = 0;
+                        header[0x02] = c;
                     } else {  /* GRAM in green */
                         header[0x00] = 0;
                         header[0x01] = c;
                         header[0x02] = 0;
                     }
+                    if (bitmap[y * size_x + x] & 0x40)  /* MOB in use */
+                        header[0x00] = header[0x01] | header[0x02];
                     fwrite(header, 1, 3, a);
                 }
             }
@@ -1203,7 +1239,16 @@ int main(int argc, char *argv[])
                 fprintf(a, "%s ", argv[c]);
         }
         fprintf(a, "\n");
-        fprintf(a, "\t; Created: %s\n", asctime(date));
+        fprintf(a, "\t; Created: %s\n\n", asctime(date));
+        if (magic_mobs) {
+            fprintf(a, "\t; %d mobs\n", mob_pointer / 3);
+            fprintf(a, "%s_mobs:\n", label);
+            for (c = 0; c < mob_pointer; c += 3) {
+                fprintf(a, "\tDECLE $%04X,$%04X,$%04X\n",
+                        mobs[c], mobs[c + 1], mobs[c + 2]);
+            }
+            fprintf(a, "\n");
+        }
         fprintf(a, "\t; %d bitmaps\n", number_bitmaps);
         fprintf(a, "\t; Begin %s_bitmaps\n", label);
         fprintf(a, "%s_bitmaps:\n", label);
@@ -1215,7 +1260,7 @@ int main(int argc, char *argv[])
                     bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
         }
         fprintf(a, "\t; End %s_bitmaps\n", label);
-        fprintf(a, "\t\n");
+        fprintf(a, "\n");
         fprintf(a, "\t; %dx%d cards\n", size_x_cards, size_y_cards);
         fprintf(a, "%s_cards:\n", label);
         for (c = 0; c < size_x_cards * size_y_cards; c++) {
