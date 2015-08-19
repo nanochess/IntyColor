@@ -57,6 +57,9 @@
 //  Revisión: Aug/08/2015. New option -g allowing to enter a file with exact
 //                         clues of where are MOB positioned. Now MOB are
 //                         drawn in report.
+//  Revisión: Aug/19/2015. New options -fx and -fy for flip in X and Y
+//                         coordinate (suggested by First Spear). Warns of
+//                         unknown options.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,7 +67,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v0.9 Aug/08/2015"     /* Software version */
+#define VERSION "v1.0 Aug/19/2015"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
@@ -571,6 +574,8 @@ int main(int argc, char *argv[])
     int use_constants = 1;
     int stub = 1;
     int clues = 0;
+    int flip_x = 0;
+    int flip_y = 0;
     char *generate_report = NULL;
     char *label = "screen";
     char *input_file;
@@ -609,6 +614,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "                   The final 0/1 indicates 8x8 or 8x16\n");
         fprintf(stderr, "                   Suggestion: run with empty text file and\n");
         fprintf(stderr, "                   option -r to see what cards require MOBs\n");
+        fprintf(stderr, "    -fx   Flip image along the X-coordinate\n");
+        fprintf(stderr, "    -fy   Flip image along the Y-coordinate\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -620,7 +627,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "by a real Intellivision\n\n");
         fprintf(stderr, "It can use GROM characters if you provide grom.bin in current\n");
         fprintf(stderr, "directory.\n\n");
-        fprintf(stderr, "It requires a BMP file of 24/32 bits and for screens it\n");
+        fprintf(stderr, "It requires a BMP file of 8/24/32 bits and for screens it\n");
         fprintf(stderr, "requires a fixed size of 160x96 or any multiple of 8 pixels.\n");
         return 0;
     }
@@ -639,15 +646,23 @@ int main(int argc, char *argv[])
     arg = 1;
     while (arg < argc && argv[arg][0] == '-') {
         c = tolower(argv[arg][1]);
-        if (c == 'm')  /* -m MOBs mode */
+        if (c == 'f') {
+            d = tolower(argv[arg][2]);
+            if (d == 'x')
+                flip_x = 1;
+            else if (d == 'y')
+                flip_y = 1;
+            else
+                fprintf(stderr, "Unknown option: %s\n", argv[arg]);
+        } else if (c == 'm') {  /* -m MOBs mode */
             magic_mobs = 1;
-        if (c == 'o')  /* -o11 Initial GRAM card number */
+        } else if (c == 'o') {  /* -o11 Initial GRAM card number */
             base_offset = atoi(argv[arg] + 2);
-        if (c == 'b')  /* -b IntyBASIC mode */
+        } else if (c == 'b') {  /* -b IntyBASIC mode */
             intybasic = 1;
-        if (c == 'c')  /* -c Doesn't use constants */
+        } else if (c == 'c') {  /* -c Doesn't use constants */
             use_constants = 0;
-        if (c == 's') {  /* -s0000 Use Color Stack mode */
+        } else if (c == 's') {  /* -s0000 Use Color Stack mode */
             stack_color = 1;
             if (strlen(argv[arg]) != 6) {
                 fprintf(stderr, "Warning: Ignoring -s argument as size is invalid\n");
@@ -657,21 +672,19 @@ int main(int argc, char *argv[])
                 stack[2] = from_hex(argv[arg][4]);
                 stack[3] = from_hex(argv[arg][5]);
             }
-        }
-        if (c == 'p')  /* -p Use PRINT statement (IntyBASIC) */
+        } else if (c == 'p') {  /* -p Use PRINT statement (IntyBASIC) */
             use_print = 1;
-        if (c == 'i')  /* -i Use BITMAP instead of DATA (IntyBASIC) */
+        } else if (c == 'i') {  /* -i Use BITMAP instead of DATA (IntyBASIC) */
             use_bitmap = 1;
-        if (c == 'n')  /* -n Remove stub from output */
+        } else if (c == 'n') {  /* -n Remove stub from output */
             stub = 0;
-        if (c == 'r') {     /* -r Generate report */
+        } else if (c == 'r') {     /* -r Generate report */
             arg++;
             if (arg < argc)
                 generate_report = argv[arg];
             else
                 fprintf(stderr, "Error: missing filename for option -r\n");
-        }
-        if (c == 'g') {     /* -g Clue file */
+        } else if (c == 'g') {     /* -g Clue file */
             arg++;
             if (arg < argc) {
                 a = fopen(argv[arg], "r");
@@ -723,6 +736,8 @@ int main(int argc, char *argv[])
             } else {
                 fprintf(stderr, "Error: missing filename for option -g\n");
             }
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[arg]);
         }
         arg++;
     }
@@ -840,7 +855,7 @@ int main(int argc, char *argv[])
                     best_color = c;
                 }
             }
-            bitmap[y * size_x + x] = best_color;
+            bitmap[(flip_y ? size_y - 1 - y : y) * size_x + (flip_x ? size_x - 1 - x : x)] = best_color;
         }
     }
     fclose(a);
