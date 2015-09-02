@@ -60,6 +60,7 @@
 //  Revisión: Aug/19/2015. New options -fx and -fy for flip in X and Y
 //                         coordinate (suggested by First Spear). Warns of
 //                         unknown options.
+//  Revision: Sep/02/2015. Updated for new SCREEN syntax.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1441,11 +1442,14 @@ int main(int argc, char *argv[])
                 }
             } else {
                 if (size_x != 160) {
+#if 0
                     fprintf(a, "\tFOR y = 0 TO %d\n", size_y_cards < 12 ? size_y_cards - 1 : 11);
                     fprintf(a, "\tFOR x = 0 TO %d\n", size_x_cards < 20 ? size_x_cards - 1 : 19);
                     fprintf(a, "\tPRINT AT y * 20 + x,%s_cards(y * %d + x)\n", label, size_x_cards);
                     fprintf(a, "\tNEXT x\n");
                     fprintf(a, "\tNEXT y\n");
+#endif
+                    fprintf(a, "\tSCREEN %s_cards,0,0,%d,%d,%d\n", label, size_x_cards > 20 ? 20 : size_x_cards, size_y_cards > 12 ? 12 : size_y_cards, size_x_cards);
                 } else {
                     if (size_y < 96)
                         fprintf(a, "\tSCREEN %s_cards,0,0,20,%d\n", label, size_y_cards);
