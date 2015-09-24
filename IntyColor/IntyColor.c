@@ -61,6 +61,8 @@
 //                         coordinate (suggested by First Spear). Warns of
 //                         unknown options.
 //  Revision: Sep/02/2015. Updated for new SCREEN syntax.
+//  Revision: Sep/24/2015. When using magic MOBs and assembler code output,
+//                         it outputs MOB data in hardware sequence.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1509,13 +1511,30 @@ int main(int argc, char *argv[])
         }
         fprintf(a, "\n");
         fprintf(a, "\t; Created: %s\n\n", asctime(date));
-        if (magic_mobs) {
+        if (magic_mobs && mob_pointer > 0) {
             fprintf(a, "\t; %d mobs\n", mob_pointer / 3);
             fprintf(a, "%s_mobs:\n", label);
+            fprintf(a, "\tDECLE ");
             for (c = 0; c < mob_pointer; c += 3) {
-                fprintf(a, "\tDECLE $%04X,$%04X,$%04X\n",
-                        mobs[c], mobs[c + 1], mobs[c + 2]);
+                fprintf(a, "$%04X", mobs[c]);
+                if (c + 3 < mob_pointer)
+                    fprintf(a, ",");
             }
+            fprintf(a, "\t; X\n");
+            fprintf(a, "\tDECLE ");
+            for (c = 0; c < mob_pointer; c += 3) {
+                fprintf(a, "$%04X", mobs[c + 1]);
+                if (c + 3 < mob_pointer)
+                    fprintf(a, ",");
+            }
+            fprintf(a, "\t; Y\n");
+            fprintf(a, "\tDECLE ");
+            for (c = 0; c < mob_pointer; c += 3) {
+                fprintf(a, "$%04X", mobs[c + 2]);
+                if (c + 3 < mob_pointer)
+                    fprintf(a, ",");
+            }
+            fprintf(a, "\t; Attribute\n");
             fprintf(a, "\n");
         }
         fprintf(a, "\t; %d bitmaps\n", number_bitmaps);
