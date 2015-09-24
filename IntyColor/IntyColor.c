@@ -70,7 +70,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v1.1 Sep/02/2015"     /* Software version */
+#define VERSION "v1.1.1 Sep/24/2015"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
