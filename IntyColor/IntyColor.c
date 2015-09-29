@@ -63,6 +63,9 @@
 //  Revision: Sep/02/2015. Updated for new SCREEN syntax.
 //  Revision: Sep/24/2015. When using magic MOBs and assembler code output,
 //                         it outputs MOB data in hardware sequence.
+//  Revision: Sep/29/2015. Solved bug in reversing colors when using
+//                         optimize_from_grom. Better syntax for assembler
+//                         output.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,7 +73,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v1.1.1 Sep/24/2015"     /* Software version */
+#define VERSION "v1.1.1 Sep/29/2015"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
@@ -438,6 +441,7 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                         d = color_foreground;
                         color_foreground = color_background;
                         color_background = d;
+                        *yo |= 1;   /* Flip colors */
                     }
                 } else if (c == 64) {
                     c = -1;
@@ -485,6 +489,7 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                             d = color_foreground;
                             color_foreground = color_background;
                             color_background = d;
+                            *yo |= 1;   /* Flip colors */
                         } else {
                             for (d = 0; d < 8; d++)
                                 bit[d] = ~bit[d];
@@ -1184,7 +1189,13 @@ int main(int argc, char *argv[])
                         bit[c] |= 0x80 >> d;
                 }
             }
-            c = optimize_from_grom(x, y, color_foreground, color_background, 1, NULL);
+            d = 0;
+            c = optimize_from_grom(x, y, color_foreground, color_background, 1, &d);
+            if (d != 0) {
+                d = color_foreground;
+                color_foreground = color_background;
+                color_background = d;
+            }
             if (color_foreground == -1)
                 color_foreground = 0;
             if (c >= 256) {
@@ -1513,25 +1524,28 @@ int main(int argc, char *argv[])
         fprintf(a, "\t; Created: %s\n\n", asctime(date));
         if (magic_mobs && mob_pointer > 0) {
             fprintf(a, "\t; %d mobs\n", mob_pointer / 3);
-            fprintf(a, "%s_mobs:\n", label);
+            fprintf(a, "%s_mobs_total:\tequ %d\n", label, mob_pointer / 3);
+            fprintf(a, "%s_mobs_x:", label);
             fprintf(a, "\tDECLE ");
-            for (c = 0; c < mob_pointer; c += 3) {
+            for (c = 0; c < 24; c += 3) {
                 fprintf(a, "$%04X", mobs[c]);
-                if (c + 3 < mob_pointer)
+                if (c + 3 < 24)
                     fprintf(a, ",");
             }
             fprintf(a, "\t; X\n");
+            fprintf(a, "%s_mobs_y:", label);
             fprintf(a, "\tDECLE ");
-            for (c = 0; c < mob_pointer; c += 3) {
+            for (c = 0; c < 24; c += 3) {
                 fprintf(a, "$%04X", mobs[c + 1]);
-                if (c + 3 < mob_pointer)
+                if (c + 3 < 24)
                     fprintf(a, ",");
             }
             fprintf(a, "\t; Y\n");
+            fprintf(a, "%s_mobs_a:", label);
             fprintf(a, "\tDECLE ");
-            for (c = 0; c < mob_pointer; c += 3) {
+            for (c = 0; c < 24; c += 3) {
                 fprintf(a, "$%04X", mobs[c + 2]);
-                if (c + 3 < mob_pointer)
+                if (c + 3 < 24)
                     fprintf(a, ",");
             }
             fprintf(a, "\t; Attribute\n");
