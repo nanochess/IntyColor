@@ -66,6 +66,8 @@
 //  Revision: Sep/29/2015. Solved bug in reversing colors when using
 //                         optimize_from_grom. Better syntax for assembler
 //                         output.
+//  Revision: Oct/14/2015. Solved another bug in reversing color when using
+//                         optimize_from_grom this time in Stack Color mode.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,7 +75,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v1.1.1 Sep/29/2015"     /* Software version */
+#define VERSION "v1.1.2 Oct/14/2015"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
@@ -395,9 +397,7 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                             bit[d] = ~bit[d];
                         c = -1;
                     } else {
-                        d = color_foreground;
-                        color_foreground = color_background;
-                        color_background = d;
+                        *yo |= 1;   /* Flip colors */
                     }
                 } else if (c == 256) {
                     c = -1;
@@ -438,9 +438,6 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                             bit[d] = ~bit[d];
                         c = -1;
                     } else {
-                        d = color_foreground;
-                        color_foreground = color_background;
-                        color_background = d;
                         *yo |= 1;   /* Flip colors */
                     }
                 } else if (c == 64) {
