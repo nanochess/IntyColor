@@ -68,6 +68,9 @@
 //                         output.
 //  Revision: Oct/14/2015. Solved another bug in reversing color when using
 //                         optimize_from_grom this time in Stack Color mode.
+//  Revision: Feb/26/2017. New option -a for extracting all bitmaps without
+//                         checking for duplicates, useful for scrolling
+//                         with GRAM redefinition.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,7 +78,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v1.1.2 Oct/14/2015"     /* Software version */
+#define VERSION "v1.1.4 Feb/16/2017"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
@@ -89,7 +92,7 @@ int grom_exists;
 /* Indicates if GROM file exists for using */
 unsigned char grom[256 * 8];    /* Contents of GROM file */
 
-unsigned char bitmaps[64 * 8];  /* Bitmaps created */
+unsigned char *bitmaps;         /* Bitmaps created */
 int number_bitmaps;             /* Number of bitmaps used */
 
 unsigned char bit[16];
@@ -581,7 +584,9 @@ int main(int argc, char *argv[])
     int clues = 0;
     int flip_x = 0;
     int flip_y = 0;
+    int wants_all = 0;
     char *generate_report = NULL;
+    char *grom_file = NULL;
     char *label = "screen";
     char *input_file;
     
@@ -619,8 +624,11 @@ int main(int argc, char *argv[])
         fprintf(stderr, "                   The final 0/1 indicates 8x8 or 8x16\n");
         fprintf(stderr, "                   Suggestion: run with empty text file and\n");
         fprintf(stderr, "                   option -r to see what cards require MOBs\n");
-        fprintf(stderr, "    -fx   Flip image along the X-coordinate\n");
+        fprintf(stderr, "    -x p/grom.bin  Path and file for grom.bin, by default it\n");
+        fprintf(stderr, "                   searches in current path for grom.bin\n");
+        fprintf(stderr, "    -fx   Flip image along the X-coordinate (mirror)\n");
         fprintf(stderr, "    -fy   Flip image along the Y-coordinate\n");
+        fprintf(stderr, "    -a    All 8x8 cards as continuous bitmap in output\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -634,11 +642,16 @@ int main(int argc, char *argv[])
         fprintf(stderr, "directory.\n\n");
         fprintf(stderr, "It requires a BMP file of 8/24/32 bits and for screens it\n");
         fprintf(stderr, "requires a fixed size of 160x96 or any multiple of 8 pixels.\n");
+        fprintf(stderr, "\n");
+        fprintf(stderr, "The -a option is for working over monochrome bitmaps and\n");
+        fprintf(stderr, "generating a continous bitmap for scrolling with more than\n");
+        fprintf(stderr, "the limit of GRAM definitions (the program must define the\n");
+        fprintf(stderr, "bitmaps as the scrolling goes on).\n");
         return 0;
     }
     
     /* Check for GROM to use shapes */
-    a = fopen("grom.bin", "rb");
+    a = fopen(grom_file ? grom_file : "grom.bin", "rb");
     if (a != NULL) {
         fread(grom, 1, sizeof(grom), a);
         fclose(a);
@@ -689,6 +702,12 @@ int main(int argc, char *argv[])
                 generate_report = argv[arg];
             else
                 fprintf(stderr, "Error: missing filename for option -r\n");
+        } else if (c == 'x') {  /* -x path to grom.bin */
+            arg++;
+            if (arg < argc)
+                grom_file = argv[arg];
+            else
+                fprintf(stderr, "Error: missing filename for option -x\n");
         } else if (c == 'g') {     /* -g Clue file */
             arg++;
             if (arg < argc) {
@@ -741,6 +760,8 @@ int main(int argc, char *argv[])
             } else {
                 fprintf(stderr, "Error: missing filename for option -g\n");
             }
+        } else if (c == 'a') {      /* -a All bitmaps */
+            wants_all = 1;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[arg]);
         }
@@ -758,6 +779,12 @@ int main(int argc, char *argv[])
     } else {
         if (!use_constants && !magic_mobs)
             fprintf(stderr, "Warning: argument -c is ignored if not using -m\n");
+    }
+    if (wants_all) {
+        if (magic_mobs) {
+            fprintf(stderr, "Warning: argument -m is ignored if using -a\n");
+            magic_mobs = 0;
+        }
     }
     if (arg >= argc) {
         fprintf(stderr, "Missing input file name\n");
@@ -806,6 +833,21 @@ int main(int argc, char *argv[])
     }
     if ((size_y & 7) != 0) {
         fprintf(stderr, "The input file doesn't measure a multiple of 8 in Y size\n");
+        fclose(a);
+        exit(3);
+    }
+    if (size_x == 0 || size_y == 0) {
+        fprintf(stderr, "There's a weird BMP file in the input. I'm scared...\n");
+        fclose(a);
+        exit(3);
+    }
+    if (wants_all) {
+        bitmaps = malloc((size_x / 8) * 64 * (size_y / 8) * sizeof(char));
+    } else {
+        bitmaps = malloc(64 * sizeof(char));
+    }
+    if (bitmaps == NULL) {
+        fprintf(stderr, "Couldn't allocate bitmaps array\n");
         fclose(a);
         exit(3);
     }
@@ -1130,7 +1172,17 @@ int main(int argc, char *argv[])
             color_background = current_used[1];  /* Note it can be -1 */
             
             /* Align color per mode */
-            if (stack_color) {
+            if (wants_all) {
+                if (color_background == -1)
+                    color_background = 0;
+                if (color_foreground <= color_background) {
+                    c = color_foreground;
+                    color_foreground = color_background;
+                    color_background = c;
+                }
+                if (color_foreground == 0 && color_background == 0)
+                    color_foreground = 7;
+            } else if (stack_color) {
                 if (color_foreground == stack[current_stack]
                     && color_background != -1) {
                     c = color_foreground;
@@ -1187,18 +1239,24 @@ int main(int argc, char *argv[])
                 }
             }
             d = 0;
-            c = optimize_from_grom(x, y, color_foreground, color_background, 1, &d);
-            if (d != 0) {
-                d = color_foreground;
-                color_foreground = color_background;
-                color_background = d;
-            }
-            if (color_foreground == -1)
-                color_foreground = 0;
-            if (c >= 256) {
-                c += base_offset;
+            if (wants_all) {
+                memcpy(&bitmaps[number_bitmaps * 8], &bit[0], 8);
+                number_bitmaps++;
+                c = 256;
             } else {
-                mark_usage(x, y, 0x20);
+                c = optimize_from_grom(x, y, color_foreground, color_background, 1, &d);
+                if (d != 0) {
+                    d = color_foreground;
+                    color_foreground = color_background;
+                    color_background = d;
+                }
+                if (color_foreground == -1)
+                color_foreground = 0;
+                if (c >= 256) {
+                    c += base_offset;
+                } else {
+                    mark_usage(x, y, 0x20);
+                }
             }
             
             /* Generate final value for BACKTAB */
