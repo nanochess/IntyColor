@@ -616,7 +616,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "        Creates image for use with IntyBASIC code\n\n");
         fprintf(stderr, "    -n     Removes stub code for display in IntyBASIC mode\n");
         fprintf(stderr, "    -p     Uses PRINT in IntyBASIC mode\n");
-        fprintf(stderr, "    -o20   Starts offset for cards in 20 (0-63 is valid)\n");
+        fprintf(stderr, "    -o20   Initial offset for cards is 20 (0-63 is valid)\n");
         fprintf(stderr, "    -m     Tries to use MOBs for more than 2 colors per card\n");
         fprintf(stderr, "    -c     Doesn't use constants.bas for -m option\n");
         fprintf(stderr, "    -i     Generates BITMAP statements instead of DATA\n");
@@ -646,9 +646,9 @@ int main(int argc, char *argv[])
         fprintf(stderr, "by a real Intellivision\n\n");
         fprintf(stderr, "It can use GROM characters if you provide grom.bin in current\n");
         fprintf(stderr, "directory.\n\n");
-        fprintf(stderr, "It requires a BMP file of 8/24/32 bits and for screens it\n");
-        fprintf(stderr, "requires a fixed size of 160x96 or any multiple of 8 pixels.\n");
-        fprintf(stderr, "\n");
+        fprintf(stderr, "It requires a BMP file of 8/24/32 bits, remember Intellivision\n");
+        fprintf(stderr, "screen is a fixed size of 160x96 pixels but this utility will\n");
+        fprintf(stderr, "accept any multiple of 8 pixels in any coordinate.\n\n");
         fprintf(stderr, "The -a option is for working over monochrome bitmaps and\n");
         fprintf(stderr, "generating a continous bitmap for scrolling with more than\n");
         fprintf(stderr, "the limit of GRAM definitions (the program must define the\n");
