@@ -71,6 +71,8 @@
 //  Revision: Feb/26/2017. New option -a for extracting all bitmaps without
 //                         checking for duplicates, useful for scrolling
 //                         with GRAM redefinition.
+//  Revision: Jul/25/2017. Solved bug when allocating bitmaps array, it
+//                         underassigned space. Added option -e.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,7 +80,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v1.1.4 Feb/16/2017"     /* Software version */
+#define VERSION "v1.1.5 Jul/25/2017"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
@@ -571,6 +573,8 @@ int main(int argc, char *argv[])
     int d;
     int n;
     unsigned char buffer[54 + 1024];  /* Header and palette */
+    unsigned char color_replacement[32];
+    int color_replacement_size = 0;
     unsigned short *ap;
     
     int arg;
@@ -610,12 +614,12 @@ int main(int argc, char *argv[])
         fprintf(stderr, "        Creates image for use with assembler code\n\n");
         fprintf(stderr, "    intycolor -b [-n] [-p] [-i] image.bmp image.bas [label]\n");
         fprintf(stderr, "        Creates image for use with IntyBASIC code\n\n");
-        fprintf(stderr, "    -n    Removes stub code for display in IntyBASIC mode\n");
-        fprintf(stderr, "    -p    Uses PRINT in IntyBASIC mode\n");
-        fprintf(stderr, "    -o20  Starts offset for cards in 20 (0-63 is valid)\n");
-        fprintf(stderr, "    -m    Tries to use MOBs for more than 2 colors per card\n");
-        fprintf(stderr, "    -c    Doesn't use constants.bas for -m option\n");
-        fprintf(stderr, "    -i    Generates BITMAP statements instead of DATA\n");
+        fprintf(stderr, "    -n     Removes stub code for display in IntyBASIC mode\n");
+        fprintf(stderr, "    -p     Uses PRINT in IntyBASIC mode\n");
+        fprintf(stderr, "    -o20   Starts offset for cards in 20 (0-63 is valid)\n");
+        fprintf(stderr, "    -m     Tries to use MOBs for more than 2 colors per card\n");
+        fprintf(stderr, "    -c     Doesn't use constants.bas for -m option\n");
+        fprintf(stderr, "    -i     Generates BITMAP statements instead of DATA\n");
         fprintf(stderr, "    -r output.bmp  Generate BMP report of conversion in file\n");
         fprintf(stderr, "                   red = error, green = GRAM, yellow = GROM\n");
         fprintf(stderr, "                   grey = MOB\n");
@@ -626,9 +630,11 @@ int main(int argc, char *argv[])
         fprintf(stderr, "                   option -r to see what cards require MOBs\n");
         fprintf(stderr, "    -x p/grom.bin  Path and file for grom.bin, by default it\n");
         fprintf(stderr, "                   searches in current path for grom.bin\n");
-        fprintf(stderr, "    -fx   Flip image along the X-coordinate (mirror)\n");
-        fprintf(stderr, "    -fy   Flip image along the Y-coordinate\n");
-        fprintf(stderr, "    -a    All 8x8 cards as continuous bitmap in output\n");
+        fprintf(stderr, "    -fx    Flip image along the X-coordinate (mirror)\n");
+        fprintf(stderr, "    -fy    Flip image along the Y-coordinate\n");
+        fprintf(stderr, "    -a     All 8x8 cards as continuous bitmap in output\n");
+        fprintf(stderr, "    -e45d2 Replace color 4 with 5 and d with 2 before process,\n");
+        fprintf(stderr, "           useful to recreate same image with other colors.\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -762,6 +768,18 @@ int main(int argc, char *argv[])
             }
         } else if (c == 'a') {      /* -a All bitmaps */
             wants_all = 1;
+        } else if (c == 'e') {      /* -e Color replacement */
+            char *ap1 = &argv[arg][2];
+            
+            while (isxdigit(ap1[0]) && isxdigit(ap1[1])) {
+                if (color_replacement_size < 32) {
+                    color_replacement[color_replacement_size++] = from_hex(ap1[0]);
+                    color_replacement[color_replacement_size++] = from_hex(ap1[1]);
+                } else {
+                    fprintf(stderr, "Error: too many color replacements in option -e\n");
+                }
+                ap1 += 2;
+            }
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[arg]);
         }
@@ -842,9 +860,9 @@ int main(int argc, char *argv[])
         exit(3);
     }
     if (wants_all) {
-        bitmaps = malloc((size_x / 8) * 64 * (size_y / 8) * sizeof(char));
+        bitmaps = malloc(size_x_cards * size_y_cards * 8 * sizeof(char));
     } else {
-        bitmaps = malloc(64 * sizeof(char));
+        bitmaps = malloc(64 * 8 * sizeof(char));
     }
     if (bitmaps == NULL) {
         fprintf(stderr, "Couldn't allocate bitmaps array\n");
@@ -900,6 +918,12 @@ int main(int argc, char *argv[])
                 if (d < best_difference) {
                     best_difference = d;
                     best_color = c;
+                }
+            }
+            for (c = 0; c < color_replacement_size; c += 2) {
+                if (best_color == color_replacement[c]) {
+                    best_color = color_replacement[c + 1];
+                    break;
                 }
             }
             bitmap[(flip_y ? size_y - 1 - y : y) * size_x + (flip_x ? size_x - 1 - x : x)] = best_color;
@@ -1251,7 +1275,7 @@ int main(int argc, char *argv[])
                     color_background = d;
                 }
                 if (color_foreground == -1)
-                color_foreground = 0;
+                    color_foreground = 0;
                 if (c >= 256) {
                     c += base_offset;
                 } else {
