@@ -74,7 +74,8 @@
 //  Revision: Jul/25/2017. Solved bug when allocating bitmaps array, it
 //                         underassigned space. Added option -e.
 //  Revision: Aug/30/2017. Solved another bug when allocating bitmaps array.
-//                         Option -a avoids generating card data.
+//                         Option -a avoids generating card data. Added -d
+//                         option for tall chunks (8x16 pixels).
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -591,6 +592,8 @@ int main(int argc, char *argv[])
     int flip_x = 0;
     int flip_y = 0;
     int wants_all = 0;
+    int tall_chunks = 0;
+    int step_card;
     char *generate_report = NULL;
     char *grom_file = NULL;
     char *label = "screen";
@@ -638,6 +641,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "           doesn't generate card data.\n");
         fprintf(stderr, "    -e45d2 Replace color 4 with 5 and d with 2 before process,\n");
         fprintf(stderr, "           useful to recreate same image with other colors.\n");
+        fprintf(stderr, "    -d     Process image in chunks of 16 pixels high, useful\n");
+        fprintf(stderr, "           to create MOB bitmaps.\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -783,6 +788,8 @@ int main(int argc, char *argv[])
                 }
                 ap1 += 2;
             }
+        } else if (c == 'd') {      /* -d 16 pixels high chunks */
+            tall_chunks = 1;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[arg]);
         }
@@ -1177,130 +1184,159 @@ int main(int argc, char *argv[])
     
     /* Generate the bitmap */
     total_errors = 0;
-    for (y = 0; y < size_y; y += 8) {
-        for (x = 0; x < size_x; x += 8) {  /* For each 8x8 block */
-            /* Per mode */
-            current_used = &used_color[((y / 8 * size_x_cards) + (x / 8)) * 16];
-            if (current_used[2] != -1) {  /* Too many colors in block */
-                fprintf(stdout, "Too many colors in block x=%d,y=%d (", x, y);
-                for (e = 0; e < 16 && current_used[e] != -1; e++) {
-                    if (e)
-                        fprintf(stdout, ",");
-                    fprintf(stdout, "%d", current_used[e]);
-                }
-                fprintf(stdout, ")\n");
+    step_card = 0;
+    x = 0;
+    y = 0;
+    while (1) {     /* Process each 8x8 block */
+        
+        /* Per mode */
+        current_used = &used_color[((y / 8 * size_x_cards) + (x / 8)) * 16];
+        if (current_used[2] != -1) {  /* Too many colors in block */
+            fprintf(stdout, "Too many colors in block x=%d,y=%d (", x, y);
+            for (e = 0; e < 16 && current_used[e] != -1; e++) {
+                if (e)
+                    fprintf(stdout, ",");
+                fprintf(stdout, "%d", current_used[e]);
+            }
+            fprintf(stdout, ")\n");
+            err_code = 1;
+            total_errors++;
+            mark_usage(x, y, 0x10);
+        }
+        color_foreground = current_used[0];
+        if (color_foreground == -1)
+            color_foreground = 1;
+        color_background = current_used[1];  /* Note it can be -1 */
+        
+        /* Align color per mode */
+        if (wants_all) {
+            if (color_background == -1)
+                color_background = 0;
+            if (color_foreground <= color_background) {
+                c = color_foreground;
+                color_foreground = color_background;
+                color_background = c;
+            }
+            if (color_foreground == 0 && color_background == 0)
+                color_foreground = 7;
+        } else if (stack_color) {
+            if (color_foreground == stack[current_stack]
+                && color_background != -1) {
+                c = color_foreground;
+                color_foreground = color_background;
+                color_background = c;
+            }
+            if (color_foreground == stack[(current_stack + 1) & 3]
+                && color_background != stack[current_stack]) {
+                c = color_foreground;
+                color_foreground = color_background;
+                color_background = c;
+            }
+            if (color_background != -1
+                && color_background != stack[current_stack]
+                && color_background != stack[(current_stack + 1) & 3]) {
+                fprintf(stdout,
+                        "Background color %d not aligned with color stack (%d or %d) in block x=%d,y=%d\n",
+                        color_background, stack[current_stack], stack[(current_stack + 1) & 3], x, y);
                 err_code = 1;
                 total_errors++;
                 mark_usage(x, y, 0x10);
             }
-            color_foreground = current_used[0];
+        } else {
+            if (color_foreground > 7) {
+                c = color_foreground;
+                color_foreground = color_background;
+                color_background = c;
+            }
+            if (color_foreground > 7) {
+                fprintf(stdout,
+                        "Foreground color %d outside of primary colors in block x=%d,y=%d\n",
+                        color_foreground, x, y);
+                err_code = 1;
+                total_errors++;
+                mark_usage(x, y, 0x10);
+            }
+            if (color_background == -1) {
+                color_background = color_foreground;
+                color_foreground = -1;
+            }
+            if (color_foreground == 0 && color_background != -1 && color_background < 8) {
+                c = color_foreground;
+                color_foreground = color_background;
+                color_background = c;
+            }
+        }
+        
+        /* Convert to bitmap */
+        for (c = 0; c < 8; c++) {
+            bit[c] = 0;
+            for (d = 0; d < 8; d++) {
+                if ((bitmap[(y + c) * size_x + x + d] & 0x0f) == color_foreground)
+                    bit[c] |= 0x80 >> d;
+            }
+        }
+        d = 0;
+        if (wants_all) {
+            memcpy(&bitmaps[number_bitmaps * 8], &bit[0], 8);
+            number_bitmaps++;
+            c = 256;
+        } else {
+            c = optimize_from_grom(x, y, color_foreground, color_background, 1, &d);
+            if (d != 0) {
+                d = color_foreground;
+                color_foreground = color_background;
+                color_background = d;
+            }
             if (color_foreground == -1)
-                color_foreground = 1;
-            color_background = current_used[1];  /* Note it can be -1 */
-            
-            /* Align color per mode */
-            if (wants_all) {
-                if (color_background == -1)
-                    color_background = 0;
-                if (color_foreground <= color_background) {
-                    c = color_foreground;
-                    color_foreground = color_background;
-                    color_background = c;
-                }
-                if (color_foreground == 0 && color_background == 0)
-                    color_foreground = 7;
-            } else if (stack_color) {
-                if (color_foreground == stack[current_stack]
-                    && color_background != -1) {
-                    c = color_foreground;
-                    color_foreground = color_background;
-                    color_background = c;
-                }
-                if (color_foreground == stack[(current_stack + 1) & 3]
-                    && color_background != stack[current_stack]) {
-                    c = color_foreground;
-                    color_foreground = color_background;
-                    color_background = c;
-                }
-                if (color_background != -1
-                    && color_background != stack[current_stack]
-                    && color_background != stack[(current_stack + 1) & 3]) {
-                    fprintf(stdout,
-                            "Background color %d not aligned with color stack (%d or %d) in block x=%d,y=%d\n",
-                            color_background, stack[current_stack], stack[(current_stack + 1) & 3], x, y);
-                    err_code = 1;
-                    total_errors++;
-                    mark_usage(x, y, 0x10);
-                }
+                color_foreground = 0;
+            if (c >= 256) {
+                c += base_offset;
             } else {
-                if (color_foreground > 7) {
-                    c = color_foreground;
-                    color_foreground = color_background;
-                    color_background = c;
-                }
-                if (color_foreground > 7) {
-                    fprintf(stdout,
-                            "Foreground color %d outside of primary colors in block x=%d,y=%d\n",
-                            color_foreground, x, y);
-                    err_code = 1;
-                    total_errors++;
-                    mark_usage(x, y, 0x10);
-                }
-                if (color_background == -1) {
-                    color_background = color_foreground;
-                    color_foreground = -1;
-                }
-                if (color_foreground == 0 && color_background != -1 && color_background < 8) {
-                    c = color_foreground;
-                    color_foreground = color_background;
-                    color_background = c;
+                mark_usage(x, y, 0x20);
+            }
+        }
+        
+        /* Generate final value for BACKTAB */
+        if (stack_color) {
+            if (color_background == stack[current_stack])
+                d = 0;
+            else if (color_background == stack[(current_stack + 1) & 3]) {
+                d = 0x2000;
+                current_stack = (current_stack + 1) & 3;
+            } else {
+                d = 0;
+            }
+            *ap++ = (c << 3) | (color_foreground & 7) | ((color_foreground & 8) << 9) | d;
+        } else {
+            if (color_background == -1)
+                color_background = 0;
+            *ap++ = (c << 3) | color_foreground | ((color_background & 3) << 9) | ((color_background & 0x04) << 11) | ((color_background & 0x08) << 9);
+        }
+        
+        /* Advance to next 8x8 bitmap */
+        if (tall_chunks) {
+            if (step_card == 0 && y + 8 < size_y) {
+                y = y + 8;
+                step_card = 1;
+            } else {
+                if (step_card == 1)
+                    y = y - 8;
+                x = x + 8;
+                step_card = 0;
+                if (x >= size_x) {
+                    x = 0;
+                    y = y + 16;
+                    if (y >= size_y)
+                        break;
                 }
             }
-            
-            /* Convert to bitmap */
-            for (c = 0; c < 8; c++) {
-                bit[c] = 0;
-                for (d = 0; d < 8; d++) {
-                    if ((bitmap[(y + c) * size_x + x + d] & 0x0f) == color_foreground)
-                        bit[c] |= 0x80 >> d;
-                }
-            }
-            d = 0;
-            if (wants_all) {
-                memcpy(&bitmaps[number_bitmaps * 8], &bit[0], 8);
-                number_bitmaps++;
-                c = 256;
-            } else {
-                c = optimize_from_grom(x, y, color_foreground, color_background, 1, &d);
-                if (d != 0) {
-                    d = color_foreground;
-                    color_foreground = color_background;
-                    color_background = d;
-                }
-                if (color_foreground == -1)
-                    color_foreground = 0;
-                if (c >= 256) {
-                    c += base_offset;
-                } else {
-                    mark_usage(x, y, 0x20);
-                }
-            }
-            
-            /* Generate final value for BACKTAB */
-            if (stack_color) {
-                if (color_background == stack[current_stack])
-                    d = 0;
-                else if (color_background == stack[(current_stack + 1) & 3]) {
-                    d = 0x2000;
-                    current_stack = (current_stack + 1) & 3;
-                } else {
-                    d = 0;
-                }
-                *ap++ = (c << 3) | (color_foreground & 7) | ((color_foreground & 8) << 9) | d;
-            } else {
-                if (color_background == -1)
-                    color_background = 0;
-                *ap++ = (c << 3) | color_foreground | ((color_background & 3) << 9) | ((color_background & 0x04) << 11) | ((color_background & 0x08) << 9);
+        } else {
+            x = x + 8;
+            if (x >= size_x) {
+                x = 0;
+                y = y + 8;
+                if (y >= size_y)
+                    break;
             }
         }
     }
