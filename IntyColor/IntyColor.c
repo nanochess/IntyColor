@@ -73,6 +73,8 @@
 //                         with GRAM redefinition.
 //  Revision: Jul/25/2017. Solved bug when allocating bitmaps array, it
 //                         underassigned space. Added option -e.
+//  Revision: Aug/30/2017. Solved another bug when allocating bitmaps array.
+//                         Option -a avoids generating card data.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -632,7 +634,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "                   searches in current path for grom.bin\n");
         fprintf(stderr, "    -fx    Flip image along the X-coordinate (mirror)\n");
         fprintf(stderr, "    -fy    Flip image along the Y-coordinate\n");
-        fprintf(stderr, "    -a     All 8x8 cards as continuous bitmap in output\n");
+        fprintf(stderr, "    -a     All 8x8 cards as continuous bitmap in output,\n");
+        fprintf(stderr, "           doesn't generate card data.\n");
         fprintf(stderr, "    -e45d2 Replace color 4 with 5 and d with 2 before process,\n");
         fprintf(stderr, "           useful to recreate same image with other colors.\n");
         fprintf(stderr, "\n");
@@ -824,7 +827,7 @@ int main(int argc, char *argv[])
         exit(3);
     }
     if (buffer[0x1c] != 8 && buffer[0x1c] != 24 && buffer[0x1c] != 32) {
-        fprintf(stderr, "The input file is not in 8/24/32-bits format\n");
+        fprintf(stderr, "The input file is in %d bits format (not 8/24/32)\n", buffer[0x1c]);
         fclose(a);
         exit(3);
     }
@@ -836,7 +839,7 @@ int main(int argc, char *argv[])
         }
     }
     if (buffer[0x1e] != 0 || buffer[0x1f] != 0 || buffer[0x20] != 0 || buffer[0x21] != 0) {
-        fprintf(stderr, "Cannot handle compressed input files\n");
+        fprintf(stderr, "Cannot handle compressed input files (codec 0x%08x)\n", (buffer[0x21] << 24) | (buffer[0x20] << 16) | (buffer[0x1f] << 8) | (buffer[0x1e]));
         fclose(a);
         exit(3);
     }
@@ -844,13 +847,19 @@ int main(int argc, char *argv[])
     size_y = buffer[0x16] | (buffer[0x17] << 8);
     if (size_y >= 32768)
         size_y -= 65536;
+    if (size_y >= 0) {
+        n = 0;
+    } else {
+        size_y = -size_y;
+        n = 1;
+    }
     if ((size_x & 7) != 0) {
-        fprintf(stderr, "The input file doesn't measure a multiple of 8 in X size\n");
+        fprintf(stderr, "The input file doesn't measure a multiple of 8 in X size (it's %d pixels)\n", size_x);
         fclose(a);
         exit(3);
     }
     if ((size_y & 7) != 0) {
-        fprintf(stderr, "The input file doesn't measure a multiple of 8 in Y size\n");
+        fprintf(stderr, "The input file doesn't measure a multiple of 8 in Y size (it's %d pixels)\n", size_y);
         fclose(a);
         exit(3);
     }
@@ -859,6 +868,8 @@ int main(int argc, char *argv[])
         fclose(a);
         exit(3);
     }
+    size_x_cards = size_x / 8;
+    size_y_cards = size_y / 8;
     if (wants_all) {
         bitmaps = malloc(size_x_cards * size_y_cards * 8 * sizeof(char));
     } else {
@@ -869,14 +880,6 @@ int main(int argc, char *argv[])
         fclose(a);
         exit(3);
     }
-    if (size_y >= 0) {
-        n = 0;
-    } else {
-        size_y = -size_y;
-        n = 1;
-    }
-    size_x_cards = size_x / 8;
-    size_y_cards = size_y / 8;
     bitmap = malloc(size_x * size_y * sizeof(char));
     screen = malloc(size_x_cards * size_y_cards * sizeof(unsigned short));
     used_color = malloc(size_x_cards * size_y_cards * 16);
@@ -1574,7 +1577,7 @@ int main(int argc, char *argv[])
             }
         }
         fprintf(a, "\n");
-        if (!use_print) {
+        if (!use_print && !wants_all) {
             fprintf(a, "\tREM %dx%d cards\n", size_x_cards, size_y_cards);
             fprintf(a, "%s_cards:\n", label);
             for (c = 0; c < size_x_cards * size_y_cards; c++) {
@@ -1642,16 +1645,18 @@ int main(int argc, char *argv[])
         }
         fprintf(a, "\t; End %s_bitmaps\n", label);
         fprintf(a, "\n");
-        fprintf(a, "\t; %dx%d cards\n", size_x_cards, size_y_cards);
-        fprintf(a, "%s_cards:\n", label);
-        for (c = 0; c < size_x_cards * size_y_cards; c++) {
-            if (c % size_x_cards == 0)
-                fprintf(a, "\tDECLE ");
-            fprintf(a, "$%04X", screen[c]);
-            if (c % size_x_cards == size_x_cards - 1 || c + 1 == size_x_cards * size_y_cards)
-                fprintf(a, "\n");
-            else
-                fprintf(a, ",");
+        if (!wants_all) {
+            fprintf(a, "\t; %dx%d cards\n", size_x_cards, size_y_cards);
+            fprintf(a, "%s_cards:\n", label);
+            for (c = 0; c < size_x_cards * size_y_cards; c++) {
+                if (c % size_x_cards == 0)
+                    fprintf(a, "\tDECLE ");
+                fprintf(a, "$%04X", screen[c]);
+                if (c % size_x_cards == size_x_cards - 1 || c + 1 == size_x_cards * size_y_cards)
+                    fprintf(a, "\n");
+                else
+                    fprintf(a, ",");
+            }
         }
     }
     fclose(a);
