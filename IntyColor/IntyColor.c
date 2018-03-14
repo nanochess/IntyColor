@@ -643,6 +643,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "           useful to recreate same image with other colors.\n");
         fprintf(stderr, "    -d     Process image in chunks of 16 pixels high, useful\n");
         fprintf(stderr, "           to create MOB bitmaps.\n");
+        fprintf(stderr, "    -v     Process 8x8 cards in vertical direction first.\n");
+        fprintf(stderr, "           Useful for horizontal scrolling bitmaps and -a option.\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -790,6 +792,8 @@ int main(int argc, char *argv[])
             }
         } else if (c == 'd') {      /* -d 16 pixels high chunks */
             tall_chunks = 1;
+        } else if (c == 'v') {      /* -v process in vertical direction */
+            tall_chunks = 2;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[arg]);
         }
@@ -1314,7 +1318,15 @@ int main(int argc, char *argv[])
         }
         
         /* Advance to next 8x8 bitmap */
-        if (tall_chunks) {
+        if (tall_chunks == 2) {  /* -v */
+            y = y + 8;
+            if (y >= size_y) {
+                y = 0;
+                x = x + 8;
+                if (x >= size_x)
+                    break;
+            }
+        } else if (tall_chunks == 1) {  /* -d */
             if (step_card == 0 && y + 8 < size_y) {
                 y = y + 8;
                 step_card = 1;
