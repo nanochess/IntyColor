@@ -761,6 +761,12 @@ int main(int argc, char *argv[])
                             x = 0;
                         if (c < 3)
                             fprintf(stderr, "Error: less than 3 numbers in line of clue file\n");
+                        for (c = 0; c < color_replacement_size; c += 2) {
+                            if (color == color_replacement[c]) {
+                                color = color_replacement[c + 1];
+                                break;
+                            }
+                        }
                         clue[total_clues][0] = x;
                         clue[total_clues][1] = y;
                         clue[total_clues][2] = color;
