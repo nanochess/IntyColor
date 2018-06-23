@@ -76,6 +76,8 @@
 //  Revision: Aug/30/2017. Solved another bug when allocating bitmaps array.
 //                         Option -a avoids generating card data. Added -d
 //                         option for tall chunks (8x16 pixels).
+//  Revision: Jun/22/2018. Allows to pad defined cards by a number of cards
+//                         or by multiple of cards.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -193,7 +195,7 @@ int check_for_valid(int color, int x, int y, int x_size, int y_size, int two_hig
     int y2;
     int c;
     
-    if (x + 8 * x_size > size_x || y + 8 * y_size > size_y)
+    if (x + 8 * x_size > size_x || y + (two_high ? 16 : 8) * y_size > size_y)
         return 0;
     
     /* Get the offset for the MOB (trying to optimize) */
@@ -247,9 +249,21 @@ int check_for_valid(int color, int x, int y, int x_size, int y_size, int two_hig
                         c++;
                 }
             }
+#if 0
+            for (y2 = 0; y2 < y_size; y2++) {
+                if (y1 + y2 >= size_y)
+                    continue;
+                for (x2 = 0; x2 < x_size; x2++) {
+                    if (x1 + x2 >= size_x)
+                        continue;
+                    printf("%d,", bitmap[(y1 + y2) * size_x + x1 + x2]);
+                }
+                printf("\n");
+            }
+#endif
             if (c > 0 && c < x_size * y_size) {
 #ifdef DEBUG
-                fprintf(stderr, "MOB not applied because incomplete pixel\n");
+                fprintf(stderr, "MOB not applied because incomplete pixel (%d of %dx%d at %d,%d, started at %d,%d)\n", c, x_size, y_size, x1, y1, x, y);
 #endif
                 return 0;
             }
@@ -593,6 +607,7 @@ int main(int argc, char *argv[])
     int flip_y = 0;
     int wants_all = 0;
     int tall_chunks = 0;
+    int pad_cards = 0;
     int step_card;
     char *generate_report = NULL;
     char *grom_file = NULL;
@@ -645,6 +660,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "           to create MOB bitmaps.\n");
         fprintf(stderr, "    -v     Process 8x8 cards in vertical direction first.\n");
         fprintf(stderr, "           Useful for horizontal scrolling bitmaps and -a option.\n");
+        fprintf(stderr, "    -k4    Add 4 blank cards to generated data\n");
+        fprintf(stderr, "    -kx4   Pad generated data to a multiple of 4 cards\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -800,6 +817,15 @@ int main(int argc, char *argv[])
             tall_chunks = 1;
         } else if (c == 'v') {      /* -v process in vertical direction */
             tall_chunks = 2;
+        } else if (c == 'k') {      /* -k pad cards */
+            char *ap1 = &argv[arg][2];
+
+            if (tolower(*ap1) == 'x') {
+                ap1++;
+                pad_cards = atoi(ap1) * 2 + 1;
+            } else {
+                pad_cards = atoi(ap1) * 2;
+            }
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[arg]);
         }
@@ -888,9 +914,9 @@ int main(int argc, char *argv[])
     size_x_cards = size_x / 8;
     size_y_cards = size_y / 8;
     if (wants_all) {
-        bitmaps = malloc(size_x_cards * size_y_cards * 8 * sizeof(char));
+        bitmaps = malloc((size_x_cards * size_y_cards + pad_cards / 2) * 8 * sizeof(char));
     } else {
-        bitmaps = malloc(64 * 8 * sizeof(char));
+        bitmaps = malloc((64 + pad_cards / 2) * 8 * sizeof(char));
     }
     if (bitmaps == NULL) {
         fprintf(stderr, "Couldn't allocate bitmaps array\n");
@@ -1358,10 +1384,41 @@ int main(int argc, char *argv[])
             }
         }
     }
+    
+    /* Pad output */
+    c = pad_cards / 2;
+    if (c > 0) {
+        if (pad_cards & 1) {
+            if (number_bitmaps % c) {
+                c = c - number_bitmaps % c;
+                while (c--) {
+                    if (!wants_all && number_bitmaps == 64) {
+                        fprintf(stderr, "More than 64 cards defined when padding.\n");
+                        err_code = 1;
+                        break;
+                    }
+                    memset(&bitmaps[number_bitmaps * 8], 0, 8);
+                    number_bitmaps++;
+                }
+            }
+        } else {
+            while (c--) {
+                if (!wants_all && number_bitmaps == 64) {
+                    fprintf(stderr, "More than 64 cards defined when padding.\n");
+                    err_code = 1;
+                    break;
+                }
+                memset(&bitmaps[number_bitmaps * 8], 0, 8);
+                number_bitmaps++;
+            }
+        }
+    }
     if (total_errors > 1)
         fprintf(stderr, "Found %d errors while converting image \"%s\".\n", total_errors, input_file);
     else if (total_errors == 1)
         fprintf(stderr, "Found %d error while converting image \"%s\".\n", total_errors, input_file);
+    else
+        fprintf(stderr, "Used %d cards for image.\n", number_bitmaps);
     
     /* Generate report file */
     if (generate_report) {
