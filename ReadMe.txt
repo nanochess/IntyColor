@@ -1,4 +1,4 @@
-IntyColor converter v1.1.5 Jul/25/2017.
+IntyColor converter v1.1.6 Jun/22/2018.
 by Oscar Toledo Gutierrez. http://nanochess.org/
 
 This utility converts BMP files to Intellivision graphics format, generates both
@@ -33,6 +33,12 @@ Usage:
     -a     All 8x8 cards as continuous bitmap in output
     -e45d2 Replace color 4 with 5 and d with 2 before process,
            useful to recreate same image with other colors.
+    -d     Process image in chunks of 16 pixels high, useful
+           to create MOB bitmaps.
+    -v     Process 8x8 cards in vertical direction first.
+           Useful for horizontal scrolling bitmaps and -a option.
+    -k4    Add 4 blank cards to generated data
+    -kx4   Pad generated data to a multiple of 4 cards
 
 By default intycolor creates images for use with Intellivision
 Background/Foreground video format, you can use 8 primary

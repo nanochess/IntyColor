@@ -85,7 +85,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v1.1.5 Jul/25/2017"     /* Software version */
+#define VERSION "v1.1.6 Jun/22/2018"     /* Software version */
 
 #define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
 
