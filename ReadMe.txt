@@ -1,4 +1,4 @@
-IntyColor converter v1.1.6 Jun/22/2018.
+IntyColor converter v1.1.7 Dec/03/2018.
 by Oscar Toledo Gutierrez. http://nanochess.org/
 
 This utility converts BMP files to Intellivision graphics format, generates both
@@ -39,6 +39,9 @@ Usage:
            Useful for horizontal scrolling bitmaps and -a option.
     -k4    Add 4 blank cards to generated data
     -kx4   Pad generated data to a multiple of 4 cards
+    -q16   Define bitmaps in blocks of 16 cards (default)
+           When not using music player in IntyBASIC, limit is 18.
+           When using ECS music player in IntyBASIC, limit is 13.
 
 By default intycolor creates images for use with Intellivision
 Background/Foreground video format, you can use 8 primary

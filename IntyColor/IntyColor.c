@@ -78,6 +78,8 @@
 //                         option for tall chunks (8x16 pixels).
 //  Revision: Jun/22/2018. Allows to pad defined cards by a number of cards
 //                         or by multiple of cards.
+//  Revision: Dec/03/2018. Allows to define another numbers of cards per
+//                         frame (previously fixed macro BLOCK_SIZE).
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,9 +87,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v1.1.6 Jun/22/2018"     /* Software version */
-
-#define BLOCK_SIZE   16         /* Before it was 18, reduced for PLAY support */
+#define VERSION "v1.1.7 Dec/03/2018"     /* Software version */
 
 /*#define DEBUG*/
 
@@ -609,6 +609,7 @@ int main(int argc, char *argv[])
     int tall_chunks = 0;
     int pad_cards = 0;
     int step_card;
+    int block_size = 16;
     char *generate_report = NULL;
     char *grom_file = NULL;
     char *label = "screen";
@@ -662,6 +663,9 @@ int main(int argc, char *argv[])
         fprintf(stderr, "           Useful for horizontal scrolling bitmaps and -a option.\n");
         fprintf(stderr, "    -k4    Add 4 blank cards to generated data\n");
         fprintf(stderr, "    -kx4   Pad generated data to a multiple of 4 cards\n");
+        fprintf(stderr, "    -q16   Define bitmaps in blocks of 16 cards (default)\n");
+        fprintf(stderr, "           When not using music player in IntyBASIC, limit is 18\n");
+        fprintf(stderr, "           When using ECS Music player in IntyBASIC, limit is 13\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -826,6 +830,14 @@ int main(int argc, char *argv[])
             } else {
                 pad_cards = atoi(ap1) * 2;
             }
+        } else if (c == 'q') {      /* -q block size */
+            char *ap1 = &argv[arg][2];
+
+            c = atoi(ap1);
+            if (c < 1 || c > 18)
+                fprintf(stderr, "Error: wrong -q argument exceeds limits\n");
+            else
+                block_size = c;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[arg]);
         }
@@ -1569,12 +1581,12 @@ int main(int argc, char *argv[])
                 fprintf(a, "\tMODE 0,%d,%d,%d,%d\n", stack[0], stack[1], stack[2], stack[3]);
             else
                 fprintf(a, "\tMODE 1\n");
-            for (c = 0; c < number_bitmaps; c += BLOCK_SIZE) {
+            for (c = 0; c < number_bitmaps; c += block_size) {
                 fprintf(a, "\tWAIT\n");
                 fprintf(a, "\tDEFINE %d,%d,%s_bitmaps_%d\n",
                         c + base_offset,
-                        (c + BLOCK_SIZE) >= number_bitmaps ? number_bitmaps - c : BLOCK_SIZE,
-                        label, c / BLOCK_SIZE);
+                        (c + block_size) >= number_bitmaps ? number_bitmaps - c : block_size,
+                        label, c / block_size);
             }
             if (magic_mobs) {
                 for (c = 0; c < mob_pointer; c += 3) {
@@ -1668,8 +1680,8 @@ int main(int argc, char *argv[])
         }
         fprintf(a, "\t' %d bitmaps\n", number_bitmaps);
         for (c = 0; c < number_bitmaps; c++) {
-            if (c % BLOCK_SIZE == 0)
-                fprintf(a, "%s_bitmaps_%d:\n", label, c / BLOCK_SIZE);
+            if (c % block_size == 0)
+                fprintf(a, "%s_bitmaps_%d:\n", label, c / block_size);
             if (use_bitmap) {
                 fprintf(a, "\tBITMAP \"%s\"\n", binary(bitmaps[c * 8 + 0]));
                 fprintf(a, "\tBITMAP \"%s\"\n", binary(bitmaps[c * 8 + 1]));
