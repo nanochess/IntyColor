@@ -1,4 +1,4 @@
-IntyColor converter v1.1.8 Oct/01/2020
+IntyColor converter v1.1.9 Oct/01/2020
 by Oscar Toledo Gutierrez. http://nanochess.org/
 
 This utility converts BMP files to Intellivision graphics format, generates both
@@ -53,6 +53,10 @@ mode, the 0123 can be replaced with the sequence of colors
 you'll program in the Color Stack registers (hexadecimal 0-f)
 intycolor will warn you if your image cannot be represented
 by a real Intellivision
+
+If you add the plus sign (for example -s0000+) it will try to
+to replace solid 4x4 blocks with Colored Squares cards
+(allowing 4 colors per 8x8 block).
 
 It can use GROM characters if you provide grom.bin in current
 directory.
