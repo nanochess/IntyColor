@@ -123,6 +123,8 @@ int total_errors;
 int clue[8][6];
 int total_clues;
 
+int use_bitmap;
+
 /*
  ** The 16 colors available in Intellivision
  */
@@ -172,14 +174,25 @@ char *binary(int data)
 {
     static char string[9];
     
-    string[0] = (data & 0x80) ? '1' : '0';
-    string[1] = (data & 0x40) ? '1' : '0';
-    string[2] = (data & 0x20) ? '1' : '0';
-    string[3] = (data & 0x10) ? '1' : '0';
-    string[4] = (data & 0x08) ? '1' : '0';
-    string[5] = (data & 0x04) ? '1' : '0';
-    string[6] = (data & 0x02) ? '1' : '0';
-    string[7] = (data & 0x01) ? '1' : '0';
+    if (use_bitmap == 2) {
+        string[0] = (data & 0x80) ? 'X' : '.';
+        string[1] = (data & 0x40) ? 'X' : '.';
+        string[2] = (data & 0x20) ? 'X' : '.';
+        string[3] = (data & 0x10) ? 'X' : '.';
+        string[4] = (data & 0x08) ? 'X' : '.';
+        string[5] = (data & 0x04) ? 'X' : '.';
+        string[6] = (data & 0x02) ? 'X' : '.';
+        string[7] = (data & 0x01) ? 'X' : '.';
+    } else {
+        string[0] = (data & 0x80) ? '1' : '0';
+        string[1] = (data & 0x40) ? '1' : '0';
+        string[2] = (data & 0x20) ? '1' : '0';
+        string[3] = (data & 0x10) ? '1' : '0';
+        string[4] = (data & 0x08) ? '1' : '0';
+        string[5] = (data & 0x04) ? '1' : '0';
+        string[6] = (data & 0x02) ? '1' : '0';
+        string[7] = (data & 0x01) ? '1' : '0';
+    }
     string[8] = '\0';
     return string;
 }
@@ -596,7 +609,6 @@ int main(int argc, char *argv[])
     
     int arg;
     int intybasic = 0;
-    int use_bitmap = 0;
     int use_print = 0;
     int magic_mobs = 0;
     int base_offset = 0;
@@ -641,6 +653,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "    -m     Tries to use MOBs for more than 2 colors per card\n");
         fprintf(stderr, "    -c     Doesn't use constants.bas for -m option\n");
         fprintf(stderr, "    -i     Generates BITMAP statements instead of DATA\n");
+        fprintf(stderr, "    -i2    Generates BITMAP statements using X and .\n");
         fprintf(stderr, "    -r output.bmp  Generate BMP report of conversion in file\n");
         fprintf(stderr, "                   red = error, green = GRAM, yellow = GROM\n");
         fprintf(stderr, "                   grey = MOB\n");
@@ -679,7 +692,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "directory.\n\n");
         fprintf(stderr, "It requires a BMP file of 8/24/32 bits, remember Intellivision\n");
         fprintf(stderr, "screen is a fixed size of 160x96 pixels but this utility will\n");
-        fprintf(stderr, "accept any multiple of 8 pixels in any coordinate.\n\n");
+        fprintf(stderr, "accept any multiple of 8 pixels in X,Y coordinates.\n\n");
         fprintf(stderr, "The -a option is for working over monochrome bitmaps and\n");
         fprintf(stderr, "generating a continous bitmap for scrolling with more than\n");
         fprintf(stderr, "the limit of GRAM definitions (the program must define the\n");
@@ -730,7 +743,12 @@ int main(int argc, char *argv[])
         } else if (c == 'p') {  /* -p Use PRINT statement (IntyBASIC) */
             use_print = 1;
         } else if (c == 'i') {  /* -i Use BITMAP instead of DATA (IntyBASIC) */
-            use_bitmap = 1;
+            if (argv[arg][2])
+                use_bitmap = atoi(argv[arg] + 2);
+            else
+                use_bitmap = 1;
+            if (use_bitmap == 0)
+                use_bitmap = 1;
         } else if (c == 'n') {  /* -n Remove stub from output */
             stub = 0;
         } else if (c == 'r') {     /* -r Generate report */
