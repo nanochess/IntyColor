@@ -26,6 +26,8 @@
 /* Begin PBXFileReference section */
 		F459545919AEB81800259376 /* IntyColor */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = IntyColor; sourceTree = BUILT_PRODUCTS_DIR; };
 		F459545C19AEB81800259376 /* IntyColor.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = IntyColor.c; sourceTree = "<group>"; };
+		F4877CE425264AD9000673E8 /* LICENSE */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = LICENSE; sourceTree = SOURCE_ROOT; };
+		F4877CE525264AE0000673E8 /* ReadMe.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = ReadMe.txt; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,7 +60,9 @@
 		F459545B19AEB81800259376 /* IntyColor */ = {
 			isa = PBXGroup;
 			children = (
+				F4877CE425264AD9000673E8 /* LICENSE */,
 				F459545C19AEB81800259376 /* IntyColor.c */,
+				F4877CE525264AE0000673E8 /* ReadMe.txt */,
 			);
 			path = IntyColor;
 			sourceTree = "<group>";

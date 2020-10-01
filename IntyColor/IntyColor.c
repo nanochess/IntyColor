@@ -87,7 +87,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v1.1.7 Dec/03/2018"     /* Software version */
+#define VERSION "v1.1.8 Oct/01/2020"     /* Software version */
 
 /*#define DEBUG*/
 

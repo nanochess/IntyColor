@@ -1,4 +1,4 @@
-IntyColor converter v1.1.7 Dec/03/2018.
+IntyColor converter v1.1.8 Oct/01/2020
 by Oscar Toledo Gutierrez. http://nanochess.org/
 
 This utility converts BMP files to Intellivision graphics format, generates both
@@ -18,6 +18,7 @@ Usage:
     -m     Tries to use MOBs for more than 2 colors per card
     -c     Doesn't use constants.bas for -m option
     -i     Generates BITMAP statements instead of DATA
+    -i2    Generates BITMAP statements using X and .
     -r output.bmp  Generate BMP report of conversion in file
                    red = error, green = GRAM, yellow = GROM
                    grey = MOB
