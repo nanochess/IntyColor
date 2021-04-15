@@ -80,6 +80,8 @@
 //                         or by multiple of cards.
 //  Revision: Dec/03/2018. Allows to define another numbers of cards per
 //                         frame (previously fixed macro BLOCK_SIZE).
+//  Revision: Oct/01/2020. Added support for Coloured Squares mode.
+//  Revision: Apr/15/2021. Added support for Tutorvision expanded GRAM.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -87,7 +89,7 @@
 #include <ctype.h>
 #include <time.h>
 
-#define VERSION "v1.1.9 Oct/01/2020"     /* Software version */
+#define VERSION "v1.2.0 Apr/15/2021"     /* Software version */
 
 /*#define DEBUG*/
 
@@ -124,6 +126,7 @@ int clue[8][6];
 int total_clues;
 
 int use_bitmap;
+int max_gram;
 
 /*
  ** The 16 colors available in Intellivision
@@ -287,13 +290,13 @@ int check_for_valid(int color, int x, int y, int x_size, int y_size, int two_hig
     if (two_high) {
         if (memcmp(bit, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 16) == 0) {
 #ifdef DEBUG
-            fprintf(stderr, "MOB not applied because would not be used\n");
+            fprintf(stderr, "MOB not applied because it would not be used\n");
 #endif
             return 0;
         }
     } else if (memcmp(bit, "\0\0\0\0\0\0\0\0", 8) == 0) {
 #ifdef DEBUG
-        fprintf(stderr, "MOB not applied because would not be used\n");
+        fprintf(stderr, "MOB not applied because it would not be used\n");
 #endif
         return 0;
     }
@@ -529,9 +532,9 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                     }
                 }
                 if (c == number_bitmaps) {
-                    if (number_bitmaps == 64) {
-                        fprintf(stderr, "More than 64 defined cards in block %d,%d\n",
-                                x, y);
+                    if (number_bitmaps == max_gram) {
+                        fprintf(stderr, "More than %d defined cards in block %d,%d\n",
+                                max_gram, x, y);
                         err_code = 1;
                         total_errors++;
                         mark_usage(x, y, 0x10);
@@ -640,6 +643,7 @@ int main(int argc, char *argv[])
     int pad_cards = 0;
     int step_card;
     int block_size = 16;
+    int tutorvision = 0;
     char *generate_report = NULL;
     char *grom_file = NULL;
     char *label = "screen";
@@ -697,6 +701,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "    -q16   Define bitmaps in blocks of 16 cards (default)\n");
         fprintf(stderr, "           When not using music player in IntyBASIC, limit is 18\n");
         fprintf(stderr, "           When using ECS Music player in IntyBASIC, limit is 13\n");
+        fprintf(stderr, "    -t     Tutorvision mode (GRAM supports 256 defined shapes)\n");
+        fprintf(stderr, "           Only available for Color Stack mode.\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "By default intycolor creates images for use with Intellivision\n");
         fprintf(stderr, "Background/Foreground video format, you can use 8 primary\n");
@@ -732,6 +738,7 @@ int main(int argc, char *argv[])
     }
     
     /* Process arguments */
+    max_gram = 64;
     arg = 1;
     while (arg < argc && argv[arg][0] == '-') {
         c = tolower(argv[arg][1]);
@@ -880,10 +887,19 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "Error: wrong -q argument exceeds limits\n");
             else
                 block_size = c;
+        } else if (c == 't') {      /* -t Tutorvision mode */
+            tutorvision = 1;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[arg]);
         }
         arg++;
+    }
+    if (tutorvision) {
+        if (stack_color == 0) {
+            fprintf(stderr, "Warning: Tutorvision mode in Foreground/Background mode is limited to 64 GRAM cards\n");
+        } else {
+            max_gram = 256;
+        }
     }
     if (!intybasic) {
         if (use_print)
@@ -970,7 +986,7 @@ int main(int argc, char *argv[])
     if (wants_all) {
         bitmaps = malloc((size_x_cards * size_y_cards + pad_cards / 2) * 8 * sizeof(char));
     } else {
-        bitmaps = malloc((64 + pad_cards / 2) * 8 * sizeof(char));
+        bitmaps = malloc((max_gram + pad_cards / 2) * 8 * sizeof(char));
     }
     if (bitmaps == NULL) {
         fprintf(stderr, "Couldn't allocate bitmaps array\n");
@@ -1498,8 +1514,8 @@ int main(int argc, char *argv[])
             if (number_bitmaps % c) {
                 c = c - number_bitmaps % c;
                 while (c--) {
-                    if (!wants_all && number_bitmaps == 64) {
-                        fprintf(stderr, "More than 64 cards defined when padding.\n");
+                    if (!wants_all && number_bitmaps == max_gram) {
+                        fprintf(stderr, "More than %d cards defined when padding.\n", max_gram);
                         err_code = 1;
                         break;
                     }
@@ -1509,8 +1525,8 @@ int main(int argc, char *argv[])
             }
         } else {
             while (c--) {
-                if (!wants_all && number_bitmaps == 64) {
-                    fprintf(stderr, "More than 64 cards defined when padding.\n");
+                if (!wants_all && number_bitmaps == max_gram) {
+                    fprintf(stderr, "More than %d cards defined when padding.\n", max_gram);
                     err_code = 1;
                     break;
                 }
