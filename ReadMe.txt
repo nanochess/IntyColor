@@ -1,7 +1,7 @@
-IntyColor converter v1.2.0 Apr/15/2021
+IntyColor converter v1.4.0 May/14/2025
 by Oscar Toledo Gutierrez. http://nanochess.org/
 
-This utility converts BMP files to Intellivision graphics format, generates both
+This utility converts BMP/PNG files to Intellivision graphics format, generates both
 assembly and IntyBASIC code.
  
 Usage:

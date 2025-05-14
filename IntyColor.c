@@ -88,14 +88,16 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
+#include "lodepng.h"
 
-#define VERSION "v1.2.0 Apr/15/2021"     /* Software version */
+#define VERSION "v1.4.0 May/14/2025"     /* Software version */
 
 /*#define DEBUG*/
 
-unsigned char *bitmap;          /* Origin bitmap converted to indexed colors 0-15 */
+unsigned char *image;           /* Bitmap in 24-bit RGB format */
 int size_x;                     /* Size X in pixels */
 int size_y;                     /* Size Y in pixels */
+unsigned char *bitmap;          /* Origin bitmap converted to indexed colors 0-15 */
 
 int grom_exists;
 /* Indicates if GROM file exists for using */
@@ -618,6 +620,7 @@ int is_valid_4x4(int x, int y) {
 int main(int argc, char *argv[])
 {
     FILE *a;
+    char *p;
     int x;
     int y;
     int c;
@@ -628,6 +631,9 @@ int main(int argc, char *argv[])
     int color_replacement_size = 0;
     unsigned short *ap;
     
+    int png_file;
+    int bmp_format;
+
     int arg;
     int intybasic = 0;
     int use_print = 0;
@@ -661,7 +667,7 @@ int main(int argc, char *argv[])
     actual = time(0);
     date = localtime(&actual);
     if (argc < 3) {
-        fprintf(stderr, "\nConverter from BMP to Intellivision Background/Foreground format\n");
+        fprintf(stderr, "\nConverter from BMP/PNG to Intellivision Background/Foreground format\n");
         fprintf(stderr, VERSION "  by Oscar Toledo G. http://nanochess.org\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "Usage:\n\n");
@@ -749,7 +755,7 @@ int main(int argc, char *argv[])
             else if (d == 'y')
                 flip_y = 1;
             else
-                fprintf(stderr, "Unknown option: %s\n", argv[arg]);
+                fprintf(stderr, "Error: Unknown option %s\n", argv[arg]);
         } else if (c == 'm') {  /* -m MOBs mode */
             magic_mobs = 1;
         } else if (c == 'o') {  /* -o11 Initial GRAM card number */
@@ -872,7 +878,7 @@ int main(int argc, char *argv[])
             tall_chunks = 2;
         } else if (c == 'k') {      /* -k pad cards */
             char *ap1 = &argv[arg][2];
-
+            
             if (tolower(*ap1) == 'x') {
                 ap1++;
                 pad_cards = atoi(ap1) * 2 + 1;
@@ -881,7 +887,7 @@ int main(int argc, char *argv[])
             }
         } else if (c == 'q') {      /* -q block size */
             char *ap1 = &argv[arg][2];
-
+            
             c = atoi(ap1);
             if (c < 1 || c > 18)
                 fprintf(stderr, "Error: wrong -q argument exceeds limits\n");
@@ -890,7 +896,7 @@ int main(int argc, char *argv[])
         } else if (c == 't') {      /* -t Tutorvision mode */
             tutorvision = 1;
         } else {
-            fprintf(stderr, "Unknown option: %s\n", argv[arg]);
+            fprintf(stderr, "Error: Unknown option %s\n", argv[arg]);
         }
         arg++;
     }
@@ -921,64 +927,107 @@ int main(int argc, char *argv[])
         }
     }
     if (arg >= argc) {
-        fprintf(stderr, "Missing input file name\n");
+        fprintf(stderr, "Error: Missing input file name\n");
         exit(2);
     }
     
     /* Open input file */
-    fprintf(stdout, "Processing: %s\n", argv[arg]);
-    a = fopen(input_file = argv[arg], "rb");
-    arg++;
-    if (a == NULL) {
-        fprintf(stderr, "Missing input file\n");
-        exit(2);
+    input_file = argv[arg];
+    fprintf(stdout, "Processing: %s\n", input_file);
+    png_file = 0;
+    if (strlen(input_file) > 4) {
+        p = input_file + strlen(input_file);
+        if (p[-4] == '.' && tolower(p[-3]) == 'p' && tolower(p[-2]) == 'n' && tolower(p[-1]) == 'g') {
+            png_file = 1;
+        }
     }
-    fread(buffer, 1, 54 + 1024, a);
-    if (buffer[0] != 'B' || buffer[1] != 'M') {
-        fprintf(stderr, "The input file is not in BMP format\n");
-        fclose(a);
-        exit(3);
-    }
-    if (buffer[0x1c] != 8 && buffer[0x1c] != 24 && buffer[0x1c] != 32) {
-        fprintf(stderr, "The input file is in %d bits format (not 8/24/32)\n", buffer[0x1c]);
-        fclose(a);
-        exit(3);
-    }
-    if (buffer[0x1c] == 8) {
-        if (buffer[0x2e] != 0 || (buffer[0x2f] != 0 && buffer[0x2f] != 1)) {
-            fprintf(stderr, "Unsupported palette for 8 bits format\n");
+    if (png_file == 0) {
+        a = fopen(input_file, "rb");
+        arg++;
+        if (a == NULL) {
+            fprintf(stderr, "Error: Missing input file\n");
+            exit(2);
+        }
+        fread(buffer, 1, 54 + 1024, a);
+        if (buffer[0] != 'B' || buffer[1] != 'M') {
+            fprintf(stderr, "Error: The input file is not in BMP format\n");
             fclose(a);
             exit(3);
         }
-    }
-    if (buffer[0x1e] != 0 || buffer[0x1f] != 0 || buffer[0x20] != 0 || buffer[0x21] != 0) {
-        fprintf(stderr, "Cannot handle compressed input files (codec 0x%08x)\n", (buffer[0x21] << 24) | (buffer[0x20] << 16) | (buffer[0x1f] << 8) | (buffer[0x1e]));
+        bmp_format = buffer[0x1c];
+        if (bmp_format != 8 && bmp_format != 24 && bmp_format != 32) {
+            fprintf(stderr, "Error: The input file is in %d bits format (not 8/24/32)\n", bmp_format);
+            fclose(a);
+            exit(3);
+        }
+        if (bmp_format == 8) {
+            if (buffer[0x2e] != 0 || (buffer[0x2f] != 0 && buffer[0x2f] != 1)) {
+                fprintf(stderr, "Error: Unsupported palette for 8 bits format\n");
+                fclose(a);
+                exit(3);
+            }
+        }
+        if (buffer[0x1e] != 0 || buffer[0x1f] != 0 || buffer[0x20] != 0 || buffer[0x21] != 0) {
+            fprintf(stderr, "Error: Cannot handle compressed input files (codec 0x%08x)\n", (buffer[0x21] << 24) | (buffer[0x20] << 16) | (buffer[0x1f] << 8) | (buffer[0x1e]));
+            fclose(a);
+            exit(3);
+        }
+        size_x = buffer[0x12] | (buffer[0x13] << 8);
+        size_y = buffer[0x16] | (buffer[0x17] << 8);
+        if (size_y >= 32768)
+            size_y -= 65536;
+        if (size_y >= 0) {
+            n = 0;
+        } else {
+            size_y = -size_y;
+            n = 1;
+        }
+        if (size_x == 0 || size_y == 0) {
+            fprintf(stderr, "There's a weird BMP file in the input. I'm scared...\n");
+            fclose(a);
+            exit(3);
+        }
+        image = malloc(size_x * size_y * 3);
+        if (image == NULL) {
+            fprintf(stderr, "Error: Couldn't allocate memory for image\n");
+            fclose(a);
+            exit(3);
+        }
+        /* Read image and normalize as 24-bit RGB */
+        fseek(a, buffer[10] | (buffer[11] << 8) | (buffer[12] << 16) | (buffer[13] << 24), SEEK_SET);
+        for (y = n ? 0 : size_y - 1; n ? y < size_y : y >= 0; n ? y++ : y--) {
+            for (x = 0; x < size_x; x++) {
+                if (bmp_format == 8) {            /* 256 color */
+                    fread(buffer, 1, 1, a);
+                    memcpy(buffer, buffer + 54 + buffer[0] * 4, 4);
+                } else if (bmp_format == 24) {    /* 24 bits */
+                    fread(buffer, 1, 3, a);
+                } else {                            /* 32 bits */
+                    fread(buffer, 1, 4, a);
+                }
+                image[(y * size_x + x) * 3 + 0] = buffer[2];
+                image[(y * size_x + x) * 3 + 1] = buffer[1];
+                image[(y * size_x + x) * 3 + 2] = buffer[0];
+            }
+        }
         fclose(a);
-        exit(3);
-    }
-    size_x = buffer[0x12] | (buffer[0x13] << 8);
-    size_y = buffer[0x16] | (buffer[0x17] << 8);
-    if (size_y >= 32768)
-        size_y -= 65536;
-    if (size_y >= 0) {
-        n = 0;
     } else {
-        size_y = -size_y;
-        n = 1;
+        image = NULL;
+        size_x = 0;
+        size_y = 0;
+        c = lodepng_decode24_file(&image, (unsigned *) &size_x, (unsigned *) &size_y, input_file);
+        if (c) {
+            fprintf(stderr, "Error: %s\n", lodepng_error_text(c));
+            exit(2);
+        }
+        arg++;
     }
     if ((size_x & 7) != 0) {
-        fprintf(stderr, "The input file doesn't measure a multiple of 8 in X size (it's %d pixels)\n", size_x);
-        fclose(a);
+        fprintf(stderr, "Error: The input file doesn't measure a multiple of 8 in X size (it's %d pixels)\n", size_x);
         exit(3);
     }
     if ((size_y & 7) != 0) {
-        fprintf(stderr, "The input file doesn't measure a multiple of 8 in Y size (it's %d pixels)\n", size_y);
-        fclose(a);
-        exit(3);
-    }
-    if (size_x == 0 || size_y == 0) {
-        fprintf(stderr, "There's a weird BMP file in the input. I'm scared...\n");
-        fclose(a);
+        fprintf(stderr, "Error: The input file doesn't measure a multiple of 8 in Y size (it's %d pixels)\n", size_y);
         exit(3);
     }
     size_x_cards = size_x / 8;
@@ -1010,21 +1059,14 @@ int main(int argc, char *argv[])
     for (c = 0; c < size_x_cards * size_y_cards * 16; c++)
         used_color[c] = -1;
     
-    /* Read image and approximate any color to the local palette */
-    fseek(a, buffer[10] | (buffer[11] << 8) | (buffer[12] << 16) | (buffer[13] << 24), SEEK_SET);
-    for (y = n ? 0 : size_y - 1; n ? y < size_y : y >= 0; n ? y++ : y--) {
+    for (y = 0; y < size_y; y++) {
         for (x = 0; x < size_x; x++) {
             int best_color;
             int best_difference;
             
-            if (buffer[0x1c] == 8) {            /* 256 color */
-                fread(buffer, 1, 1, a);
-                memcpy(buffer, buffer + 54 + buffer[0] * 4, 4);
-            } else if (buffer[0x1c] == 24) {    /* 24 bits */
-                fread(buffer, 1, 3, a);
-            } else {                            /* 32 bits */
-                fread(buffer, 1, 4, a);
-            }
+            buffer[0] = image[(y * size_x + x) * 3 + 2];
+            buffer[1] = image[(y * size_x + x) * 3 + 1];
+            buffer[2] = image[(y * size_x + x) * 3 + 0];
             best_color = 0;
             best_difference = 100000;
             for (c = 0; c < 16; c++) {
@@ -1045,8 +1087,7 @@ int main(int argc, char *argv[])
             bitmap[(flip_y ? size_y - 1 - y : y) * size_x + (flip_x ? size_x - 1 - x : x)] = best_color;
         }
     }
-    fclose(a);
-    
+
     /* Make note of used colors per 8x8 block */
     err_code = 0;
     current_stack = 0;
@@ -1303,14 +1344,14 @@ int main(int argc, char *argv[])
             buffer[2] = is_valid_4x4(x, y + 4);
             buffer[3] = is_valid_4x4(x + 4, y + 4);
             if (buffer[0] == stack[current_stack]
-             && buffer[1] == stack[current_stack]
-             && buffer[2] == stack[current_stack]
-             && buffer[3] == stack[current_stack]) {
+                && buffer[1] == stack[current_stack]
+                && buffer[2] == stack[current_stack]
+                && buffer[3] == stack[current_stack]) {
                 c = 0;  /* Make it invalid so the generated card code is 0x0000 */
             } else if (buffer[0] == stack[(current_stack + 1) & 3]
-                    && buffer[1] == stack[(current_stack + 1) & 3]
-                    && buffer[2] == stack[(current_stack + 1) & 3]
-                    && buffer[3] == stack[(current_stack + 1) & 3]) {
+                       && buffer[1] == stack[(current_stack + 1) & 3]
+                       && buffer[2] == stack[(current_stack + 1) & 3]
+                       && buffer[3] == stack[(current_stack + 1) & 3]) {
                 c = 0;  /* Make it invalid so the generated card code is 0x2000 */
             } else if (buffer[0] < 16 && buffer[1] < 16 && buffer[2] < 16 && buffer[3] < 16) {
                 if (buffer[0] >= 7) {
@@ -1896,4 +1937,5 @@ int main(int argc, char *argv[])
     free(bitmap);
     return 0;
 }
+
 
