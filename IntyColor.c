@@ -1935,6 +1935,7 @@ int main(int argc, char *argv[])
     }
     fclose(a);
     free(bitmap);
+    free(image);
     return 0;
 }
 
