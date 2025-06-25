@@ -633,7 +633,7 @@ int main(int argc, char *argv[])
     
     int png_file;
     int bmp_format;
-
+    
     int arg;
     int intybasic = 0;
     int use_print = 0;
@@ -1087,7 +1087,7 @@ int main(int argc, char *argv[])
             bitmap[(flip_y ? size_y - 1 - y : y) * size_x + (flip_x ? size_x - 1 - x : x)] = best_color;
         }
     }
-
+    
     /* Make note of used colors per 8x8 block */
     err_code = 0;
     current_stack = 0;
@@ -1711,8 +1711,8 @@ int main(int argc, char *argv[])
     if (arg < argc)
         label = argv[arg];
     if (intybasic == 1) {  /* IntyBASIC mode */
-        fprintf(a, "\tREM IntyColor " VERSION "\n");
-        fprintf(a, "\tREM Command: ");
+        fprintf(a, "\t' IntyColor " VERSION "\n");
+        fprintf(a, "\t' Command: ");
         for (c = 0; c < argc; c++) {
             char *b;
             
@@ -1723,111 +1723,106 @@ int main(int argc, char *argv[])
                 fprintf(a, "%s ", argv[c]);
         }
         fprintf(a, "\n");
-        fprintf(a, "\tREM Created: %s\n", asctime(date));
-        if (stub) {
-            fprintf(a, "\tREM stub for showing image\n");
-            if (use_constants)
-                fprintf(a, "\tINCLUDE \"constants.bas\"\n");
-            if (stack_color)
-                fprintf(a, "\tMODE 0,%d,%d,%d,%d\n", stack[0], stack[1], stack[2], stack[3]);
-            else
-                fprintf(a, "\tMODE 1\n");
-            for (c = 0; c < number_bitmaps; c += block_size) {
-                fprintf(a, "\tWAIT\n");
-                fprintf(a, "\tDEFINE %d,%d,%s_bitmaps_%d\n",
-                        c + base_offset,
-                        (c + block_size) >= number_bitmaps ? number_bitmaps - c : block_size,
-                        label, c / block_size);
-            }
-            if (magic_mobs) {
-                for (c = 0; c < mob_pointer; c += 3) {
-                    if (use_constants) {
-                        fprintf(a, "\tSPRITE %d,", c/ 3);
-                        if (mobs[c] & 0x0200)
-                            fprintf(a, "VISIBLE+");
-                        if (mobs[c] & 0x0400)
-                            fprintf(a, "ZOOMX2+");
-                        fprintf(a, "%d,", mobs[c] & 0x00ff);
-                        if ((mobs[c + 1] & 0x0080) == 0x0080) {
-                            fprintf(a, "DOUBLEY+");
-                        }
-                        if ((mobs[c + 1] & 0x0300) == 0x0100) {
-                            fprintf(a, "ZOOMY2+");
-                        } else if ((mobs[c + 1] & 0x0300) == 0x0200) {
-                            fprintf(a, "ZOOMY4+");
-                        } else if ((mobs[c + 1] & 0x0300) == 0x0300) {
-                            fprintf(a, "ZOOMY8+");
-                        }
-                        if ((mobs[c + 1] & 0x0c00) == 0x0400) {
-                            fprintf(a, "FLIPX+");
-                        } else if ((mobs[c + 1] & 0x0c00) == 0x0800) {
-                            fprintf(a, "FLIPY+");
-                        } else if ((mobs[c + 1] & 0x0c00) == 0x0c00) {
-                            fprintf(a, "MIRROR+");
-                        }
-                        fprintf(a, "%d,", mobs[c + 1] & 0x007f);
-                        switch (mobs[c + 2] & 0x1007) {
-                            case 0x0000:    fprintf(a, "SPR_BLACK+");       break;
-                            case 0x0001:    fprintf(a, "SPR_BLUE+");        break;
-                            case 0x0002:    fprintf(a, "SPR_RED+");         break;
-                            case 0x0003:    fprintf(a, "SPR_TAN+");         break;
-                            case 0x0004:    fprintf(a, "SPR_DARKGREEN+");   break;
-                            case 0x0005:    fprintf(a, "SPR_GREEN+");       break;
-                            case 0x0006:    fprintf(a, "SPR_YELLOW+");      break;
-                            case 0x0007:    fprintf(a, "SPR_WHITE+");       break;
-                            case 0x1000:    fprintf(a, "SPR_GREY+");        break;
-                            case 0x1001:    fprintf(a, "SPR_CYAN+");        break;
-                            case 0x1002:    fprintf(a, "SPR_ORANGE+");      break;
-                            case 0x1003:    fprintf(a, "SPR_BROWN+");       break;
-                            case 0x1004:    fprintf(a, "SPR_PINK+");        break;
-                            case 0x1005:    fprintf(a, "SPR_LIGHTBLUE+");   break;
-                            case 0x1006:    fprintf(a, "SPR_YELLOWGREEN+"); break;
-                            case 0x1007:    fprintf(a, "SPR_PURPLE+");      break;
-                        }
-                        if (mobs[c + 2] & 0x0800)
-                            fprintf(a, "SPR%02d\n", (mobs[c + 2] & 0x07f8) / 8);
-                        else
-                            fprintf(a, "$%04x\n", mobs[c + 2] & 0x07f8);
-                    } else {
-                        fprintf(a, "\tSPRITE %d,$%04x,$%04x,$%04x\n", c / 3, mobs[c], mobs[c + 1], mobs[c + 2]);
+        fprintf(a, "\t' Created: %s\n", asctime(date));
+        fprintf(a, "\t' stub for showing image\n");
+        if (use_constants)
+            fprintf(a, "\t%sINCLUDE \"constants.bas\"\n", stub ? "" : "' ");
+        if (stack_color)
+            fprintf(a, "\t%sMODE 0,%d,%d,%d,%d\n", stub ? "" : "' ", stack[0], stack[1], stack[2], stack[3]);
+        else
+            fprintf(a, "\t%sMODE 1\n", stub ? "" : "' ");
+        for (c = 0; c < number_bitmaps; c += block_size) {
+            fprintf(a, "\t%sWAIT\n", stub ? "" : "' ");
+            fprintf(a, "\t%sDEFINE %d,%d,%s_bitmaps_%d\n", stub ? "" : "' ",
+                    c + base_offset,
+                    (c + block_size) >= number_bitmaps ? number_bitmaps - c : block_size,
+                    label, c / block_size);
+        }
+        if (magic_mobs) {
+            for (c = 0; c < mob_pointer; c += 3) {
+                if (use_constants) {
+                    fprintf(a, "\t%sSPRITE %d,", stub ? "" : "' ", c / 3);
+                    if (mobs[c] & 0x0200)
+                        fprintf(a, "VISIBLE+");
+                    if (mobs[c] & 0x0400)
+                        fprintf(a, "ZOOMX2+");
+                    fprintf(a, "%d,", mobs[c] & 0x00ff);
+                    if ((mobs[c + 1] & 0x0080) == 0x0080) {
+                        fprintf(a, "DOUBLEY+");
                     }
-                }
-            }
-            fprintf(a, "\tWAIT\n");
-            if (use_print) {
-                for (c = 0; c < size_x_cards * size_y_cards; c++) {
-                    if (c >= size_x_cards * 12)         /* Avoid writing off-screen */
-                        fprintf(a, "'");
-                    if (c % size_x_cards == 0)
-                        fprintf(a, "\tPRINT AT %d,", c / size_x_cards * 20);
-                    fprintf(a, "$%04X", screen[c]);
-                    if (c % size_x_cards == size_x_cards - 1 || c + 1 == size_x_cards * size_y_cards) {
-                        fprintf(a, "\n");
-                    } else {
-                        if (c % size_x_cards == 20)     /* Avoid writing off-screen */
-                            fprintf(a, "'");
-                        fprintf(a, ",");
+                    if ((mobs[c + 1] & 0x0300) == 0x0100) {
+                        fprintf(a, "ZOOMY2+");
+                    } else if ((mobs[c + 1] & 0x0300) == 0x0200) {
+                        fprintf(a, "ZOOMY4+");
+                    } else if ((mobs[c + 1] & 0x0300) == 0x0300) {
+                        fprintf(a, "ZOOMY8+");
                     }
-                }
-            } else {
-                if (size_x != 160) {
-#if 0
-                    fprintf(a, "\tFOR y = 0 TO %d\n", size_y_cards < 12 ? size_y_cards - 1 : 11);
-                    fprintf(a, "\tFOR x = 0 TO %d\n", size_x_cards < 20 ? size_x_cards - 1 : 19);
-                    fprintf(a, "\tPRINT AT y * 20 + x,%s_cards(y * %d + x)\n", label, size_x_cards);
-                    fprintf(a, "\tNEXT x\n");
-                    fprintf(a, "\tNEXT y\n");
-#endif
-                    fprintf(a, "\tSCREEN %s_cards,0,0,%d,%d,%d\n", label, size_x_cards > 20 ? 20 : size_x_cards, size_y_cards > 12 ? 12 : size_y_cards, size_x_cards);
-                } else {
-                    if (size_y < 96)
-                        fprintf(a, "\tSCREEN %s_cards,0,0,20,%d\n", label, size_y_cards);
+                    if ((mobs[c + 1] & 0x0c00) == 0x0400) {
+                        fprintf(a, "FLIPX+");
+                    } else if ((mobs[c + 1] & 0x0c00) == 0x0800) {
+                        fprintf(a, "FLIPY+");
+                    } else if ((mobs[c + 1] & 0x0c00) == 0x0c00) {
+                        fprintf(a, "MIRROR+");
+                    }
+                    fprintf(a, "%d,", mobs[c + 1] & 0x007f);
+                    switch (mobs[c + 2] & 0x1007) {
+                        case 0x0000:    fprintf(a, "SPR_BLACK+");       break;
+                        case 0x0001:    fprintf(a, "SPR_BLUE+");        break;
+                        case 0x0002:    fprintf(a, "SPR_RED+");         break;
+                        case 0x0003:    fprintf(a, "SPR_TAN+");         break;
+                        case 0x0004:    fprintf(a, "SPR_DARKGREEN+");   break;
+                        case 0x0005:    fprintf(a, "SPR_GREEN+");       break;
+                        case 0x0006:    fprintf(a, "SPR_YELLOW+");      break;
+                        case 0x0007:    fprintf(a, "SPR_WHITE+");       break;
+                        case 0x1000:    fprintf(a, "SPR_GREY+");        break;
+                        case 0x1001:    fprintf(a, "SPR_CYAN+");        break;
+                        case 0x1002:    fprintf(a, "SPR_ORANGE+");      break;
+                        case 0x1003:    fprintf(a, "SPR_BROWN+");       break;
+                        case 0x1004:    fprintf(a, "SPR_PINK+");        break;
+                        case 0x1005:    fprintf(a, "SPR_LIGHTBLUE+");   break;
+                        case 0x1006:    fprintf(a, "SPR_YELLOWGREEN+"); break;
+                        case 0x1007:    fprintf(a, "SPR_PURPLE+");      break;
+                    }
+                    if (mobs[c + 2] & 0x0800)
+                        fprintf(a, "SPR%02d\n", (mobs[c + 2] & 0x07f8) / 8);
                     else
-                        fprintf(a, "\tSCREEN %s_cards\n", label);
+                        fprintf(a, "$%04x\n", mobs[c + 2] & 0x07f8);
+                } else {
+                    fprintf(a, "\t%sSPRITE %d,$%04x,$%04x,$%04x\n", stub ? "" : "' ", c / 3, mobs[c], mobs[c + 1], mobs[c + 2]);
                 }
             }
+        }
+        fprintf(a, "\t%sWAIT\n", stub ? "" : "' ");
+        if (use_print) {
+            for (c = 0; c < size_x_cards * size_y_cards; c++) {
+                if (c >= size_x_cards * 12)         /* Avoid writing off-screen */
+                    fprintf(a, "'");
+                if (c % size_x_cards == 0)
+                    fprintf(a, "\t%sPRINT AT %d,", stub ? "" : "' ", c / size_x_cards * 20);
+                fprintf(a, "$%04X", screen[c]);
+                if (c % size_x_cards == size_x_cards - 1 || c + 1 == size_x_cards * size_y_cards) {
+                    fprintf(a, "\n");
+                } else {
+                    if (c % size_x_cards == 20)     /* Avoid writing off-screen */
+                        fprintf(a, "'");
+                    fprintf(a, ",");
+                }
+            }
+        } else {
+            if (size_x != 160) {
+                fprintf(a, "\t%sSCREEN %s_cards,0,0,%d,%d,%d\n", stub ? "" : "' ", label, size_x_cards > 20 ? 20 : size_x_cards, size_y_cards > 12 ? 12 : size_y_cards, size_x_cards);
+            } else {
+                if (size_y < 96)
+                    fprintf(a, "\t%sSCREEN %s_cards,0,0,20,%d\n", stub ? "" : "' ", label, size_y_cards);
+                else
+                    fprintf(a, "\t%sSCREEN %s_cards\n", stub ? "" : "' ", label);
+            }
+        }
+        if (stub) {
             fprintf(a, "loop:\n");
             fprintf(a, "\tGOTO loop\n\n");
+        } else {
+            fprintf(a, "\n");
         }
         fprintf(a, "\t' %d bitmaps\n", number_bitmaps);
         for (c = 0; c < number_bitmaps; c++) {
@@ -1852,7 +1847,7 @@ int main(int argc, char *argv[])
         }
         fprintf(a, "\n");
         if (!use_print && !wants_all) {
-            fprintf(a, "\tREM %dx%d cards\n", size_x_cards, size_y_cards);
+            fprintf(a, "\t' %dx%d cards\n", size_x_cards, size_y_cards);
             fprintf(a, "%s_cards:\n", label);
             for (c = 0; c < size_x_cards * size_y_cards; c++) {
                 if (c % size_x_cards == 0)
@@ -1938,5 +1933,6 @@ int main(int argc, char *argv[])
     free(image);
     return 0;
 }
+
 
 
