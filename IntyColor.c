@@ -90,7 +90,7 @@
 #include <time.h>
 #include "lodepng.h"
 
-#define VERSION "v1.4.0 May/14/2025"     /* Software version */
+#define VERSION "v1.4.1 Jul/06/2026"     /* Software version */
 
 /*#define DEBUG*/
 
@@ -114,6 +114,7 @@ int size_y_cards;               /* Screen Y size in cards */
 
 signed char *used_color;        /* Array of used colors per card */
 
+int decle8;
 int stack_color;                /* Indicates stack color mode */
 int current_stack;              /* Current point to color stack */
 int stack[4];                   /* Stack of colors */
@@ -677,6 +678,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "        Creates image for use with IntyBASIC code\n\n");
         fprintf(stderr, "    -n     Removes stub code for display in IntyBASIC mode\n");
         fprintf(stderr, "    -p     Uses PRINT in IntyBASIC mode\n");
+        fprintf(stderr, "    -h     Assembler code generates DECLE bytes instead of words\n");
         fprintf(stderr, "    -o20   Initial offset for cards is 20 (0-63 is valid)\n");
         fprintf(stderr, "    -m     Tries to use MOBs for more than 2 colors per card\n");
         fprintf(stderr, "    -c     Doesn't use constants.bas for -m option\n");
@@ -756,6 +758,8 @@ int main(int argc, char *argv[])
                 flip_y = 1;
             else
                 fprintf(stderr, "Error: Unknown option %s\n", argv[arg]);
+        } else if (c == 'h') {  /* -h */
+            decle8 = 1;
         } else if (c == 'm') {  /* -m MOBs mode */
             magic_mobs = 1;
         } else if (c == 'o') {  /* -o11 Initial GRAM card number */
@@ -1906,11 +1910,18 @@ int main(int argc, char *argv[])
         fprintf(a, "\t; Begin %s_bitmaps\n", label);
         fprintf(a, "%s_bitmaps:\n", label);
         for (c = 0; c < number_bitmaps; c++) {
-            fprintf(a, "\tDECLE $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\n",
-                    bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
-                    bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
-                    bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
-                    bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
+            if (decle8)
+                fprintf(a, "\tDECLE $%02X,$%02X,$%02X,$%02X,$%02X,$%02X,$%02X,$%02X\n",
+                        bitmaps[c * 8 + 0], bitmaps[c * 8 + 1],
+                        bitmaps[c * 8 + 2], bitmaps[c * 8 + 3],
+                        bitmaps[c * 8 + 4], bitmaps[c * 8 + 5],
+                        bitmaps[c * 8 + 6], bitmaps[c * 8 + 7]);
+            else
+                fprintf(a, "\tDECLE $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\n",
+                        bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
+                        bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
+                        bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
+                        bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
         }
         fprintf(a, "\t; End %s_bitmaps\n", label);
         fprintf(a, "\n");
