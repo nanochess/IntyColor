@@ -90,7 +90,7 @@
 #include <time.h>
 #include "lodepng.h"
 
-#define VERSION "v1.4.1 Jul/06/2026"     /* Software version */
+#define VERSION "v1.4.2 Jul/22/2026"     /* Software version */
 
 /*#define DEBUG*/
 
@@ -105,6 +105,7 @@ unsigned char grom[256 * 8];    /* Contents of GROM file */
 
 unsigned char *bitmaps;         /* Bitmaps created */
 int number_bitmaps;             /* Number of bitmaps used */
+int *location;			/* Location inside the image */
 
 unsigned char bit[16];
 
@@ -115,6 +116,7 @@ int size_y_cards;               /* Screen Y size in cards */
 signed char *used_color;        /* Array of used colors per card */
 
 int decle8;
+int show_location;
 int stack_color;                /* Indicates stack color mode */
 int current_stack;              /* Current point to color stack */
 int stack[4];                   /* Stack of colors */
@@ -378,8 +380,10 @@ int optimize_two_high(int x, int y, int color_foreground, int color_background, 
     int c;
     
     c = number_bitmaps;
+    location[number_bitmaps] = x | (y << 16);
     memcpy(&bitmaps[number_bitmaps * 8], &bit[0], 8);
     number_bitmaps++;
+    location[number_bitmaps] = x | ((y + 8) << 16);
     memcpy(&bitmaps[number_bitmaps * 8], &bit[8], 8);
     number_bitmaps++;
     c += 256;
@@ -543,6 +547,7 @@ int optimize_from_grom(int x, int y, int color_foreground, int color_background,
                         mark_usage(x, y, 0x10);
                         c = 0;
                     } else {
+                        location[c] = x | (y << 16);
                         memcpy(&bitmaps[c * 8], &bit[0], 8);
                         number_bitmaps++;
                     }
@@ -679,6 +684,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "    -n     Removes stub code for display in IntyBASIC mode\n");
         fprintf(stderr, "    -p     Uses PRINT in IntyBASIC mode\n");
         fprintf(stderr, "    -h     Assembler code generates DECLE bytes instead of words\n");
+        fprintf(stderr, "    -h2    Comment each bitmap with original x,y coordinate.\n");
         fprintf(stderr, "    -o20   Initial offset for cards is 20 (0-63 is valid)\n");
         fprintf(stderr, "    -m     Tries to use MOBs for more than 2 colors per card\n");
         fprintf(stderr, "    -c     Doesn't use constants.bas for -m option\n");
@@ -759,7 +765,11 @@ int main(int argc, char *argv[])
             else
                 fprintf(stderr, "Error: Unknown option %s\n", argv[arg]);
         } else if (c == 'h') {  /* -h */
-            decle8 = 1;
+            if (argv[arg][2] == '2') {	/* -h2 */
+                show_location = 1;
+            } else {
+                decle8 = 1;
+            }
         } else if (c == 'm') {  /* -m MOBs mode */
             magic_mobs = 1;
         } else if (c == 'o') {  /* -o11 Initial GRAM card number */
@@ -1038,10 +1048,12 @@ int main(int argc, char *argv[])
     size_y_cards = size_y / 8;
     if (wants_all) {
         bitmaps = malloc((size_x_cards * size_y_cards + pad_cards / 2) * 8 * sizeof(char));
+        location = malloc((size_x_cards * size_y_cards + pad_cards / 2) * sizeof(int));
     } else {
         bitmaps = malloc((max_gram + pad_cards / 2) * 8 * sizeof(char));
+        location = malloc((max_gram + pad_cards / 2) * sizeof(int));
     }
-    if (bitmaps == NULL) {
+    if (bitmaps == NULL || location == NULL) {
         fprintf(stderr, "Couldn't allocate bitmaps array\n");
         fclose(a);
         exit(3);
@@ -1479,6 +1491,7 @@ int main(int argc, char *argv[])
             }
             d = 0;
             if (wants_all) {
+                location[number_bitmaps] = x | (y << 16);
                 memcpy(&bitmaps[number_bitmaps * 8], &bit[0], 8);
                 number_bitmaps++;
                 c = 256;
@@ -1564,6 +1577,7 @@ int main(int argc, char *argv[])
                         err_code = 1;
                         break;
                     }
+                    location[number_bitmaps] = -1;
                     memset(&bitmaps[number_bitmaps * 8], 0, 8);
                     number_bitmaps++;
                 }
@@ -1575,6 +1589,7 @@ int main(int argc, char *argv[])
                     err_code = 1;
                     break;
                 }
+                location[number_bitmaps] = -1;
                 memset(&bitmaps[number_bitmaps * 8], 0, 8);
                 number_bitmaps++;
             }
@@ -1833,7 +1848,11 @@ int main(int argc, char *argv[])
             if (c % block_size == 0)
                 fprintf(a, "%s_bitmaps_%d:\n", label, c / block_size);
             if (use_bitmap) {
-                fprintf(a, "\tBITMAP \"%s\"\n", binary(bitmaps[c * 8 + 0]));
+                if (show_location && location[c] != -1) {
+                    fprintf(a, "\tBITMAP \"%s\"\t' %d,%d\n", binary(bitmaps[c * 8 + 0]), location[c] & 0xffff, location[c] >> 16);
+                } else {
+                    fprintf(a, "\tBITMAP \"%s\"\n", binary(bitmaps[c * 8 + 0]));
+                }
                 fprintf(a, "\tBITMAP \"%s\"\n", binary(bitmaps[c * 8 + 1]));
                 fprintf(a, "\tBITMAP \"%s\"\n", binary(bitmaps[c * 8 + 2]));
                 fprintf(a, "\tBITMAP \"%s\"\n", binary(bitmaps[c * 8 + 3]));
@@ -1842,11 +1861,20 @@ int main(int argc, char *argv[])
                 fprintf(a, "\tBITMAP \"%s\"\n", binary(bitmaps[c * 8 + 6]));
                 fprintf(a, "\tBITMAP \"%s\"\n\n", binary(bitmaps[c * 8 + 7]));
             } else {
-                fprintf(a, "\tDATA $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\n",
-                        bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
-                        bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
-                        bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
-                        bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
+                if (show_location && location[c] != -1) {
+                    fprintf(a, "\tDATA $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\t' %d,%d\n",
+                            bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
+                            bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
+                            bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
+                            bitmaps[c * 8 + 7], bitmaps[c * 8 + 6],
+                            location[c] & 0xffff, location[c] >> 16);
+                } else {
+                    fprintf(a, "\tDATA $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\n",
+                            bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
+                            bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
+                            bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
+                            bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
+                }
             }
         }
         fprintf(a, "\n");
@@ -1910,18 +1938,35 @@ int main(int argc, char *argv[])
         fprintf(a, "\t; Begin %s_bitmaps\n", label);
         fprintf(a, "%s_bitmaps:\n", label);
         for (c = 0; c < number_bitmaps; c++) {
-            if (decle8)
-                fprintf(a, "\tDECLE $%02X,$%02X,$%02X,$%02X,$%02X,$%02X,$%02X,$%02X\n",
-                        bitmaps[c * 8 + 0], bitmaps[c * 8 + 1],
-                        bitmaps[c * 8 + 2], bitmaps[c * 8 + 3],
-                        bitmaps[c * 8 + 4], bitmaps[c * 8 + 5],
-                        bitmaps[c * 8 + 6], bitmaps[c * 8 + 7]);
-            else
-                fprintf(a, "\tDECLE $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\n",
-                        bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
-                        bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
-                        bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
-                        bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
+            if (show_location && location[c] != -1) {
+                if (decle8)
+                    fprintf(a, "\tDECLE $%02X,$%02X,$%02X,$%02X,$%02X,$%02X,$%02X,$%02X\t; %d,%d\n",
+                            bitmaps[c * 8 + 0], bitmaps[c * 8 + 1],
+                            bitmaps[c * 8 + 2], bitmaps[c * 8 + 3],
+                            bitmaps[c * 8 + 4], bitmaps[c * 8 + 5],
+                            bitmaps[c * 8 + 6], bitmaps[c * 8 + 7],
+                            location[c] & 0xffff, location[c] >> 16);
+                else
+                    fprintf(a, "\tDECLE $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\t; %d,%d\n",
+                            bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
+                            bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
+                            bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
+                            bitmaps[c * 8 + 7], bitmaps[c * 8 + 6],
+                            location[c] & 0xffff, location[c] >> 16);
+            } else {
+                if (decle8)
+                    fprintf(a, "\tDECLE $%02X,$%02X,$%02X,$%02X,$%02X,$%02X,$%02X,$%02X\n",
+                            bitmaps[c * 8 + 0], bitmaps[c * 8 + 1],
+                            bitmaps[c * 8 + 2], bitmaps[c * 8 + 3],
+                            bitmaps[c * 8 + 4], bitmaps[c * 8 + 5],
+                            bitmaps[c * 8 + 6], bitmaps[c * 8 + 7]);
+                else
+                    fprintf(a, "\tDECLE $%02X%02X,$%02X%02X,$%02X%02X,$%02X%02X\n",
+                            bitmaps[c * 8 + 1], bitmaps[c * 8 + 0],
+                            bitmaps[c * 8 + 3], bitmaps[c * 8 + 2],
+                            bitmaps[c * 8 + 5], bitmaps[c * 8 + 4],
+                            bitmaps[c * 8 + 7], bitmaps[c * 8 + 6]);
+            }
         }
         fprintf(a, "\t; End %s_bitmaps\n", label);
         fprintf(a, "\n");
@@ -1940,6 +1985,8 @@ int main(int argc, char *argv[])
         }
     }
     fclose(a);
+    free(bitmaps);
+    free(location);
     free(bitmap);
     free(image);
     return 0;
