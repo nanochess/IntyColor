@@ -1208,13 +1208,14 @@ int main(int argc, char *argv[])
                             clue[n][5] ? 16 : 8);
                     for (d = best_yo; d < (best_size & 15) * (clue[n][5] ? 16 : 8) + best_yo; d++) {
                         for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c++) {
-                            if (bitmap[(y + d) * size_x + (x + c)] == best_color)
+                            if (y + d < size_y && x + c < size_x && bitmap[(y + d) * size_x + (x + c)] == best_color)
                                 bitmap[(y + d) * size_x + (x + c)] = -1;
                         }
                     }
                     for (d = best_yo; d < (best_size & 15) * (clue[n][5] ? 16 : 8) + best_yo; d += 7) {
                         for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c += 7) {
-                            lookup_used_colors((x + c) & -8, (y + d) & -8);
+                            if (((x + c) & -8) < size_x && ((y + d) & -8) < size_y)
+                                lookup_used_colors((x + c) & -8, (y + d) & -8);
                         }
                     }
                     memcpy(bit, best_bit, 8);
@@ -1322,13 +1323,14 @@ int main(int argc, char *argv[])
                         }
                         for (d = best_yo; d < (best_size & 15) * 8 + best_yo; d++) {
                             for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c++) {
-                                if (bitmap[(y + d) * size_x + (x + c)] == best_color)
+                                if (y + d < size_y && x + c < size_x && bitmap[(y + d) * size_x + (x + c)] == best_color)
                                     bitmap[(y + d) * size_x + (x + c)] = -1;
                             }
                         }
                         for (d = best_yo; d < (best_size & 15) * 8 + best_yo; d += 7) {
                             for (c = best_xo; c < ((best_size >> 4) & 15) * 8 + best_xo; c += 7) {
-                                lookup_used_colors((x + c) & -8, (y + d) & -8);
+                                if (((x + c) & -8) < size_x && ((y + d) & -8) < size_y)
+                                    lookup_used_colors((x + c) & -8, (y + d) & -8);
                             }
                         }
                         memcpy(bit, best_bit, 8);
@@ -1609,7 +1611,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Unable to write report file \"%s\"\n", generate_report);
             err_code = 2;
         } else {
-            char header[54];
+            unsigned char header[54];
             
             memset(header, 0, sizeof(header));
             header[0x00] = 'B';     /* Header */
@@ -1661,7 +1663,7 @@ int main(int argc, char *argv[])
                     sy = 1;
                 else if ((mobs[c + 1] & 0x0300) == 0x0200)
                     sy = 2;
-                else if ((mobs[c + 1] & 0x0300) == 0x0400)
+                else if ((mobs[c + 1] & 0x0300) == 0x0300)
                     sy = 4;
                 else
                     sy = 0; /* Shouldn't happen */
